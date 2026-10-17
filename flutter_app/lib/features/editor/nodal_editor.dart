@@ -389,7 +389,15 @@ class _NodeCard extends StatelessWidget {
     if (d == null) return const SizedBox();
     final rows = math.max(d.inputs.length, d.outputs.length);
     final height = 34.0 + math.max(rows, 1) * _portGap;
-    return Container(
+    return GestureDetector(
+      // TOUTE la carte est prenable : l'en-tête limite la prise sinon.
+      behavior: HitTestBehavior.opaque,
+      onPanUpdate: (delta) {
+        onMoved(NodePos(node.pos.dx + delta.delta.dx,
+            node.pos.dy + delta.delta.dy));
+      },
+      onDoubleTap: onEdit,
+      child: Container(
       width: _nodeWidth,
       height: height,
       decoration: BoxDecoration(
@@ -400,37 +408,29 @@ class _NodeCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onDoubleTap: onEdit,
-            onPanUpdate: (delta) {
-              onMoved(NodePos(node.pos.dx + delta.delta.dx,
-                  node.pos.dy + delta.delta.dy));
-            },
-            child: Container(
-              height: 24,
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              decoration: const BoxDecoration(
-                color: Color(0xFF252834),
-                borderRadius: BorderRadius.only(
-                    topLeft: Radius.circular(6), topRight: Radius.circular(6)),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(d.displayName,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w600, fontSize: 11)),
-                  ),
-                  InkWell(onTap: onEdit,
-                    child: const Icon(Icons.edit, size: 13, color: textMuted),
-                  ),
-                  InkWell(onTap: onDelete,
-                    child: const Icon(Icons.close, size: 14, color: textMuted),
-                  ),
-                ],
-              ),
+          Container(
+            height: 24,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            decoration: const BoxDecoration(
+              color: Color(0xFF252834),
+              borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(6), topRight: Radius.circular(6)),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(d.displayName,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w600, fontSize: 11)),
+                ),
+                InkWell(onTap: onEdit,
+                  child: const Icon(Icons.edit, size: 13, color: textMuted),
+                ),
+                InkWell(onTap: onDelete,
+                  child: const Icon(Icons.close, size: 14, color: textMuted),
+                ),
+              ],
             ),
           ),
           Expanded(
@@ -477,6 +477,7 @@ class _NodeCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
       ),
     );
   }

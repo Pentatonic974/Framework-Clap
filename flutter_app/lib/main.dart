@@ -6,12 +6,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/app_status.dart';
 import 'core/app_theme.dart';
 import 'core/project_model.dart';
-import 'features/build/build_panel.dart';
-import 'features/designer/grid_designer.dart';
+import 'features/build/build_actions.dart';
 import 'features/editor/editor_state.dart';
 import 'features/editor/nodal_editor.dart';
-
-// Le provider de statut du footer est partagé via core/app_status.dart.
+import 'features/designer/grid_designer.dart';
 
 void main() {
   runApp(const ProviderScope(child: ClapsStudioApp()));
@@ -39,14 +37,13 @@ class StudioShell extends ConsumerWidget {
     final project = ref.watch(projectProvider);
     final status = ref.watch(clapsStatusProvider);
     final validation = ref.watch(validationProvider);
-    const horizontalColWidth = 250.0;
 
     return Column(
       children: [
-        // ------------- header -------------
+        // ------------- header (50 px, style maquette) -------------
         Container(
           height: 50,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: const BoxDecoration(
             color: bgPanel,
             border: Border(bottom: BorderSide(color: borderColor)),
@@ -60,31 +57,35 @@ class StudioShell extends ConsumerWidget {
                 style: const TextStyle(
                     fontWeight: FontWeight.w700, color: accentOrange, fontSize: 14),
               ),
-              const Spacer(),
-              _MetaField(
-                width: 110,
+              const SizedBox(width: 14),
+              // Menu d'actions : Build / Enregistrer / Exporter JSON
+              const BuildActionsMenu(),
+              const SizedBox(width: 14),
+              // Édition meta (dialogs, pas de TextField inline qui vole le focus).
+              _MetaButton(
                 label: 'nom',
-                initial: project.spec.meta.name,
-                onChanged: (v) {
-                  final meta = project.spec.meta;
+                value: project.spec.meta.name,
+                onDone: (v) {
+                  final m = project.spec.meta;
                   ref.read(projectProvider.notifier).setMeta(GraphMeta(
-                        name: v, id: meta.id, version: meta.version, vendor: meta.vendor,
-                        url: meta.url, feature: meta.feature));
+                        name: v.isEmpty ? m.name : v,
+                        id: m.id, version: m.version,
+                        vendor: m.vendor, url: m.url, feature: m.feature));
                 },
               ),
-              const SizedBox(width: 8),
-              _MetaField(
-                width: 170,
+              const SizedBox(width: 6),
+              _MetaButton(
                 label: 'id',
-                initial: project.spec.meta.id,
-                onChanged: (v) {
-                  final meta = project.spec.meta;
+                value: project.spec.meta.id,
+                onDone: (v) {
+                  final m = project.spec.meta;
                   ref.read(projectProvider.notifier).setMeta(GraphMeta(
-                        name: meta.name, id: v, version: meta.version, vendor: meta.vendor,
-                        url: meta.url, feature: meta.feature));
+                        name: m.name, id: v.isEmpty ? m.id : v,
+                        version: m.version,
+                        vendor: m.vendor, url: m.url, feature: m.feature));
                 },
               ),
-              const SizedBox(width: 12),
+              const Spacer(),
               if (validation.errors.isEmpty)
                 const Icon(Icons.check_circle, color: accentGreen, size: 16)
               else
@@ -101,26 +102,19 @@ class StudioShell extends ConsumerWidget {
             ],
           ),
         ),
-        // ------------- workspace -------------
-        Expanded(
+        // ------------- workspace : nodal (gauche) + designer (droite) --
+        // Le panneau du milieu (BUILD PLUGIN) est remplacé par le menu.
+        const Expanded(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Expanded(child: NodalEditor()),
+              Expanded(flex: 3, child: NodalEditor()),
               VerticalDivider(width: 1, color: borderColor),
-              SizedBox(
-                width: horizontalColWidth + 60,
-                child: const BuildPanel(),
-              ),
-              VerticalDivider(width: 1, color: borderColor),
-              Expanded(
-                flex: 1,
-                child: GridDesigner(),
-              ),
+              Expanded(flex: 2, child: GridDesigner()),
             ],
           ),
         ),
-        // ------------- footer -------------
+        // ------------- footer (35 px, monospace vert) -------------
         Container(
           height: 30,
           color: const Color(0xFF0A0B0D),
@@ -136,40 +130,49 @@ class StudioShell extends ConsumerWidget {
   }
 }
 
-class _MetaField extends StatelessWidget {
-  final double width;
+/// Bouton meta : affiche la valeur, ouvre une boîte de saisie à la demande
+/// (n'intercepte jamais les clics de travail en cours).
+class _MetaButton extends StatelessWidget {
   final String label;
-  final String initial;
-  final ValueChanged<String> onChanged;
+  final String value;
+  final ValueChanged<String> onDone;
 
-  const _MetaField({
-    required this.width,
-    required this.label,
-    required this.initial,
-    required this.onChanged,
-  });
+  const _MetaButton({required this.label, required this.value, required this.onDone});
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: width,
-      height: 34,
-      child: TextField(
-        controller: TextEditingController(text: initial),
-        onChanged: onChanged,
-        textAlignVertical: TextAlignVertical.center,
-        style: const TextStyle(fontSize: 12),
-        decoration: InputDecoration(
-          labelText: label,
-          labelStyle: const TextStyle(fontSize: 9, color: textMuted),
-          filled: true,
-          fillColor: const Color(0xFF222530),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(4),
-            borderSide: const BorderSide(color: borderColor),
-          ),
-        ),
+    return Tooltip(
+      message: 'Cliquez pour modifier le $label du plugin',
+      child: ActionChip(
+        label: Text('$label : ${_short(value, 22)}',
+            style: const TextStyle(fontSize: 11)),
+        backgroundColor: const Color(0xFF222530),
+        side: const BorderSide(color: borderColor),
+        onPressed: () async {
+          final c = TextEditingController(text: value);
+          final v = await showDialog<String>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              backgroundColor: bgPanel,
+              title: Text('Modifier le $label',
+                  style: const TextStyle(fontSize: 16)),
+              content: TextField(controller: c, autofocus: true),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx), child: const Text('Annuler')),
+                FilledButton(
+                  style: FilledButton.styleFrom(backgroundColor: accentOrange),
+                  onPressed: () => Navigator.pop(ctx, c.text),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+          if (v != null) onDone(v);
+        },
       ),
     );
   }
+
+  static String _short(String s, int n) => s.length <= n ? s : '${s.substring(0, n - 1)}…';
 }
