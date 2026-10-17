@@ -4,7 +4,6 @@ library;
 
 import 'dart:math' as math;
 
-import 'package:flutter/gestures.dart' show kPrimaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -439,30 +438,25 @@ class _NodeCard extends StatelessWidget {
     final d = def;
     if (d == null) return const SizedBox();
     final rows = math.max(d.inputs.length, d.outputs.length);
-    final height = 34.0 + math.max(rows, 1) * _portGap;  // Suivi bas niveau du pointeur : PointerDown saisit immédiatement (le
-  // module suit la souris dès le mouvement, sans attendre la pan),
-  // PointerUp relâche. Aucune temporisation de geste.
-  NodePos? dragOrigin;
-  Offset? pointerOrigin;
-  bool dragging = false;
-    return Listener(
-      onPointerDown: (e) {
-        // Bus dominant : les clics accessoires (double-tap édit, ports) sont
-        // gérés par leurs propres widgets enfouis (GestureDetector internes).
-        dragging = e.buttons == kPrimaryMouseButton;
+    final height = 34.0 + math.max(rows, 1) * _portGap;
+    // Suivi absolu du pointeur : position de départ capturée au geste,
+    // position finale = départ + (curseur - curseur départ). Le nœud suit
+    // exactement la souris (pas de perte du pré-pan, pas d'incrément cumulatif).
+    NodePos? dragOrigin;
+    Offset? pointerOrigin;
+    return GestureDetector(
+      // TOUTE la carte est prenable : l'en-tête limite la prise sinon.
+      behavior: HitTestBehavior.opaque,
+      onPanStart: (details) {
         dragOrigin = NodePos(node.pos.dx, node.pos.dy);
-        pointerOrigin = e.position;
+        pointerOrigin = details.globalPosition;
       },
-      onPointerMove: (e) {
-        if (!dragging || dragOrigin == null || pointerOrigin == null) return;
-        final dPos = e.position - pointerOrigin!;
+      onPanUpdate: (details) {
+        if (dragOrigin == null || pointerOrigin == null) return;
+        final dPos = details.globalPosition - pointerOrigin!;
         onMoved(NodePos(dragOrigin!.dx + dPos.dx, dragOrigin!.dy + dPos.dy));
       },
-      onPointerUp: (e) => dragging = false,
-      onPointerCancel: (e) => dragging = false,
-      child: GestureDetector(
       onDoubleTap: onEdit,
-      behavior: HitTestBehavior.opaque, // TOUTE la carte est prenable
       child: Container(
       width: _nodeWidth,
       height: height,
@@ -543,7 +537,6 @@ class _NodeCard extends StatelessWidget {
             ),
           ),
         ],
-      ),
       ),
       ),
     );
