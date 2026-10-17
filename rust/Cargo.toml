@@ -6,6 +6,7 @@ members = [
     "crates/engine",
     "crates/clap-runtime",
     "crates/build-service",
+    "crates/render-tool",
 ]
 
 [workspace.package]

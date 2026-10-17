@@ -151,7 +151,8 @@ impl ChorusFlanger {
 }
 
 /// Réverb algorithmique Freeverb-like : 8 peignes + 4 allpass par canal.
-/// Ports : 0 In L, 1 In R, 2 Decay, 3 Damp, 4 Size ; sorties L/R + pré-blocage.
+/// Ports : 0 In L, 1 In R, 2 Decay, 3 Damp, 4 Size, 5 Mix (wet/dry) ;
+/// sorties L/R = mix(wet, dry) — le mix wet/dry est calculé dans le nœud.
 pub struct ReverbAlgo {
     tunable: [f32; 8],
     comb_buf_l: [Vec<f32>; 8],
@@ -161,7 +162,8 @@ pub struct ReverbAlgo {
     comb_val_r: [f32; 8],
     ap_buf_l: [Vec<f32>; 4],
     ap_buf_r: [Vec<f32>; 4],
-    ap_pos: [usize; 4],
+    ap_pos_l: [usize; 4],
+    ap_pos_r: [usize; 4],
     size_scale: f32,
 }
 
@@ -180,7 +182,10 @@ impl ReverbAlgo {
             comb_val_r: [0.0; 8],
             ap_buf_l: ALLPASS.map(|s| vec![0.0; (s as f32 * scale) as usize]),
             ap_buf_r: ALLPASS.map(|s| vec![0.0; ((s + 17) as f32 * scale) as usize]),
-            ap_pos: [0; 4],
+            // Positions SÉPARÉES L/R : les caps diffèrent (+17 échan.) — un
+            // index partagé déborde le canal R (bug trouvé par render-tool).
+            ap_pos_l: [0; 4],
+            ap_pos_r: [0; 4],
             size_scale: scale,
         }
     }
@@ -201,7 +206,8 @@ impl DspNode for ReverbAlgo {
             b.iter_mut().for_each(|x| *x = 0.0);
         }
         self.comb_pos = [0; 8];
-        self.ap_pos = [0; 4];
+        self.ap_pos_l = [0; 4];
+        self.ap_pos_r = [0; 4];
         self.comb_val_l = [0.0; 8];
         self.comb_val_r = [0.0; 8];
     }
@@ -214,6 +220,7 @@ impl DspNode for ReverbAlgo {
             let decay = inputs.ctl_at(2, i).unwrap_or(0.5).clamp(0.0, 0.99);
             let damp = inputs.ctl_at(3, i).unwrap_or(0.5).clamp(0.0, 0.99);
             let size = inputs.ctl_at(4, i).unwrap_or(0.5).clamp(0.1, 1.0);
+            let mix = inputs.ctl_at(5, i).unwrap_or(0.35).clamp(0.0, 1.0); // wet
             let _ = size; // la variation de taille nécessiterait une réallocation -> non in RT
             let room = 0.7 + 0.28 * decay;
             let damp_k = 0.15 + 0.35 * damp;
@@ -246,15 +253,19 @@ impl DspNode for ReverbAlgo {
                 out_l += lp;
                 out_r += rp;
             }
-            // --- 4 allpass en série ---
+            // --- 4 allpass en série (positions L/R séparées) ---
             for k in 0..4 {
-                out_l = Self::ap_process(&mut self.ap_buf_l[k], &mut self.ap_pos[k], out_l);
-                out_r = Self::ap_process(&mut self.ap_buf_r[k], &mut self.ap_pos[k], out_r);
+                out_l = Self::ap_process(&mut self.ap_buf_l[k], &mut self.ap_pos_l[k], out_l);
+                out_r = Self::ap_process(&mut self.ap_buf_r[k], &mut self.ap_pos_r[k], out_r);
             }
             let _ = self.comb_val_l;
             let _ = self.comb_val_r;
-            outputs.out(0)[i] = out_l * 0.25;
-            outputs.out(1)[i] = out_r * 0.25;
+            // Mix wet/dry : sortie = wet * mix + dry * (1 - mix). Le wet est
+            // normalisé (le réseau Freeverb sort très chaud à 8 peignes).
+            let wet_l = out_l * 0.25;
+            let wet_r = out_r * 0.25;
+            outputs.out(0)[i] = wet_l * mix + l * (1.0 - mix);
+            outputs.out(1)[i] = wet_r * mix + r * (1.0 - mix);
         }
     }
 }

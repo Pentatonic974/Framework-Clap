@@ -83,6 +83,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "render-tool"
+version = "0.1.0"
+dependencies = [
+ "engine",
+ "graph-core",
+ "serde_json",
+]
+
+[[package]]
 name = "rtrb"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

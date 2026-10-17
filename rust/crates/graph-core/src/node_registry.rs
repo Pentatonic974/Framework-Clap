@@ -262,12 +262,13 @@ impl NodeRegistry {
                 .clone(),
             new("reverb_algo", "Réverb Algorithmique", "DSP - Effets")
                 .io(
-                    &[("In L", Audio), ("In R", Audio), ("Decay", Control), ("Damp", Control), ("Size", Control)],
+                    &[("In L", Audio), ("In R", Audio), ("Decay", Control), ("Damp", Control), ("Size", Control), ("Mix", Control)],
                     &[("Out L", Audio), ("Out R", Audio)],
                 )
                 .param("decay", "Decay", 0.5, 0.0, 1.0, 0.01)
                 .param("damp", "Damp", 0.5, 0.0, 1.0, 0.01)
                 .param("size", "Size", 0.5, 0.1, 1.0, 0.01)
+                .param("mix", "Mix (wet/dry)", 0.35, 0.0, 1.0, 0.01)
                 .clone(),
             new("reverb_convolution", "Réverb Convolution", "DSP - Effets")
                 .io(&[("In L", Audio), ("In R", Audio), ("IR Select", Control)], &[("Out L", Audio), ("Out R", Audio)])

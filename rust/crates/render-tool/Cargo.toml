@@ -1,0 +1,11 @@
+[package]
+name = "render-tool"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Rendu offline d'un graphe en WAV : guitare de test -> reverb -> WAV (diagnostic avant DAW)"
+
+[dependencies]
+graph-core = { workspace = true }
+engine = { workspace = true }
+serde_json = { workspace = true }
