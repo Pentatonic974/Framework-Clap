@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/app_status.dart';
 import 'core/app_theme.dart';
 import 'core/project_model.dart';
+import 'core/resizable_split.dart';
 import 'features/build/build_actions.dart';
 import 'features/editor/editor_state.dart';
 import 'features/editor/nodal_editor.dart';
@@ -102,16 +103,13 @@ class StudioShell extends ConsumerWidget {
             ],
           ),
         ),
-        // ------------- workspace : nodal (gauche) + designer (droite) --
-        // Le panneau du milieu (BUILD PLUGIN) est remplacé par le menu.
-        const Expanded(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(flex: 3, child: NodalEditor()),
-              VerticalDivider(width: 1, color: borderColor),
-              Expanded(flex: 2, child: GridDesigner()),
-            ],
+        // ------------- workspace : nodal (gauche) ⇄ designer (droite) --
+        // Séparation redimensionnable via la poignée du ResizableSplit.
+        Expanded(
+          child: ResizableSplit(
+            initialFraction: 0.6,
+            left: const NodalEditor(),
+            right: const GridDesigner(),
           ),
         ),
         // ------------- footer (35 px, monospace vert) -------------

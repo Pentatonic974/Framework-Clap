@@ -36,8 +36,8 @@
     {
       "id": "out1",
       "nodeType": "clap_audio_out",
-      "x": 460.0,
-      "y": 140.0,
+      "x": 297.0,
+      "y": 283.0,
       "params": {},
       "exposedParams": []
     }

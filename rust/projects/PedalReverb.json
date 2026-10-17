@@ -1,0 +1,34 @@
+{
+  "meta": {
+    "name": "PedalReverb",
+    "id": "com.claps.pedal-reverb",
+    "version": "1.0.0",
+    "vendor": "CLAP Studio",
+    "url": "",
+    "feature": "audio-effect"
+  },
+  "nodes": [
+    { "id": "in", "nodeType": "clap_audio_in", "x": 40, "y": 140, "params": {}, "exposedParams": [] },
+    { "id": "rv", "nodeType": "reverb_algo", "x": 230, "y": 140, "params": {}, "exposedParams": [
+      { "paramId": "decay", "name": "Decay", "default": 0.55, "min": 0.0, "max": 1.0, "step": 0.01 },
+      { "paramId": "damp", "name": "Damp", "default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01 },
+      { "paramId": "mix", "name": "Mix", "default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01 }
+    ] },
+    { "id": "meter", "nodeType": "peak_rms_meter", "x": 240, "y": 290, "params": {}, "exposedParams": [] },
+    { "id": "out", "nodeType": "clap_audio_out", "x": 460, "y": 140, "params": {}, "exposedParams": [] }
+  ],
+  "connections": [
+    { "fromNode": "in", "fromPort": 0, "toNode": "rv", "toPort": 0 },
+    { "fromNode": "in", "fromPort": 1, "toNode": "rv", "toPort": 1 },
+    { "fromNode": "rv", "fromPort": 0, "toNode": "out", "toPort": 0 },
+    { "fromNode": "rv", "fromPort": 1, "toNode": "out", "toPort": 1 },
+    { "fromNode": "rv", "fromPort": 0, "toNode": "meter", "toPort": 0 }
+  ],
+  "guiWidgets": [
+    { "id": "w1", "widgetType": "knob", "label": "Decay", "paramId": "rv/decay", "col": 0, "row": 0, "colSpan": 2, "rowSpan": 2 },
+    { "id": "w2", "widgetType": "knob", "label": "Damp", "paramId": "rv/damp", "col": 2, "row": 0, "colSpan": 2, "rowSpan": 2 },
+    { "id": "w3", "widgetType": "knob", "label": "Mix", "paramId": "rv/mix", "col": 4, "row": 0, "colSpan": 2, "rowSpan": 2 },
+    { "id": "w4", "widgetType": "vu_meter", "label": "Out Level", "paramId": "meter", "col": 6, "row": 0, "colSpan": 1, "rowSpan": 2 },
+    { "id": "w5", "widgetType": "text_logo", "label": "Pedal Reverb", "paramId": "", "col": 0, "row": 2, "colSpan": 7, "rowSpan": 1 }
+  ]
+}

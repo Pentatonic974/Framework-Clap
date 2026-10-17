@@ -324,14 +324,26 @@ class RackWidget extends ConsumerStatefulWidget {
 }
 
 class _RackWidgetState extends ConsumerState<RackWidget> {
+  RackPos? dragOriginCell;
+  Offset? pointerOrigin;
+
   @override
   Widget build(BuildContext context) {
     final w = widget.widget;
     return GestureDetector(
       onDoubleTap: widget.onEdited,
-      onPanUpdate: (delta) {
-        final cell = _nearestCell(w, delta.delta);
-        widget.onMoved(cell.col, cell.row);
+      // Déplacement absolu par le pointeur : cellule finale = cellule de
+      // départ + (curseur − curseur départ), fidèle à la souris.
+      onPanStart: (details) {
+        dragOriginCell = RackPos(w.col, w.row);
+        pointerOrigin = details.globalPosition;
+      },
+      onPanUpdate: (details) {
+        if (dragOriginCell == null || pointerOrigin == null) return;
+        final d = details.globalPosition - pointerOrigin!;
+        final target = (dragOriginCell!.col + (d.dx / 40.0).round()).clamp(0, 7);
+        final targetRow = (dragOriginCell!.row + (d.dy / 40.0).round()).clamp(0, 9);
+        widget.onMoved(target, targetRow);
       },
       child: MouseRegion(
         cursor: SystemMouseCursors.grab,
@@ -392,12 +404,7 @@ class _RackWidgetState extends ConsumerState<RackWidget> {
     );
   }
 
-  RackPos _nearestCell(GuiWidget w, Offset delta) {
-    const cell = 40.0;
-    final target = ((w.col + delta.dx / cell).round()).clamp(0, 7);
-    final targetRow = ((w.row + delta.dy / cell).round()).clamp(0, 9);
-    return RackPos(target, targetRow);
-  }
+
 
   Widget _renderBody() {
     final w = widget.widget;

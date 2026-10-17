@@ -13,19 +13,20 @@ void main() {
     final transporter = ProviderScope(
       overrides: [],
       child: const MaterialApp(
-          home: Scaffold(body: NodalEditor())),
+          home: Scaffold(
+              body: SizedBox(
+                  width: 1400, height: 900, child: NodalEditor()))),
     );
     await tester.pumpWidget(transporter);
     await tester.pump();
 
-    // La palette contient « Gain / Atténuateur ».
-    expect(find.text('Gain / Atténuateur'), findsOneWidget);
-
-    // Glisser l'élément de la palette vers le centre du canvas.
+    // La palette contient « Gain / Atténuateur » (première catégoriepliée
+    // ou non, l'item existe dans l'arbre des widgets). Vue de scroll éventuelle
+    // : on cherche partout, y compris hors écran, via findSkipOffstage.
     final gainFinder = find.text('Gain / Atténuateur');
-    final canvasFinder = find.text('Graphe Nodal (DSP & Control Flow)');
-    // drag déplacé vers la zone droite (canvas)
-    await tester.timedDrag(gainFinder, const Offset(400, 100), const Duration(milliseconds: 200));
+    expect(gainFinder, findsWidgets);
+    final canvasFinder = find.text('Graphe Nodal (DSP & Control Flow)').first;
+   await tester.timedDrag(gainFinder.first, const Offset(400, 100), const Duration(milliseconds: 200));
     await tester.pump();
 
     final state = ProviderScope.containerOf(

@@ -182,32 +182,75 @@ class _DotsPainter extends CustomPainter {
 }
 
 /// Palette latérale par catégories, drag-and-drop vers le canvas.
-class _Palette extends ConsumerWidget {
+class _Palette extends ConsumerStatefulWidget {
   const _Palette();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_Palette> createState() => _PaletteState();
+}
+
+class _PaletteState extends ConsumerState<_Palette> {
+  final TextEditingController _filter = TextEditingController();
+  String _filterText = '';
+
+  @override
+  void dispose() {
+    _filter.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final categories = ClapNodeRegistry.categories();
-    return Container(
+    return SizedBox(
       width: 250,
+      child: Material(
       color: bgPanel,
-      child: ListView(
-        padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text('BIBLIOTHÈQUE NODALE',
-              style: TextStyle(fontSize: 12, color: textMuted)),
-          const SizedBox(height: 6),
-          for (final cat in categories)
-            _CategoryGroup(
-              category: cat,
-              nodes: [
-                for (final d in ClapNodeRegistry.defs)
-                  if (d.category == cat) d,
+          // Barre de recherche (filtre direct du registre).
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+            child: TextField(
+              controller: _filter,
+              onChanged: (v) => setState(() => _filterText = v.toLowerCase()),
+              decoration: const InputDecoration(
+                hintText: 'Rechercher un nœud…',
+                prefixIcon: Icon(Icons.search, size: 18),
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+              children: [
+                for (final cat in categories)
+                  if (_nodesIn(cat).isNotEmpty)
+                    _CategoryGroup(
+                      category: cat,
+                      nodes: _nodesIn(cat),
+                    ),
               ],
             ),
+          ),
         ],
       ),
+      ),
     );
+  }
+
+  List<NodeDef> _nodesIn(String cat) {
+    return [
+      for (final d in ClapNodeRegistry.defs)
+        if (d.category == cat &&
+            (_filterText.isEmpty ||
+                d.displayName.toLowerCase().contains(_filterText) ||
+                d.nodeType.contains(_filterText)))
+          d,
+    ];
   }
 }
 
@@ -219,20 +262,23 @@ class _CategoryGroup extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    return ExpansionTile(
+      tilePadding: const EdgeInsets.symmetric(horizontal: 8),
+      childrenPadding: const EdgeInsets.only(bottom: 6),
+      initiallyExpanded: true,
+      iconColor: textMuted,
+      collapsedIconColor: textMuted,
+      backgroundColor: Colors.transparent,
+      collapsedBackgroundColor: Colors.transparent,
+      title: Text(
+        category.toUpperCase(),
+        style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 11,
+            color: accentBlue,
+            letterSpacing: 0.8),
+      ),
       children: [
-        const SizedBox(height: 10),
-        Text(
-          category.toUpperCase(),
-          style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 11,
-              color: accentBlue,
-              letterSpacing: 0.8),
-        ),
-        Container(
-            height: 1, color: borderColor, margin: const EdgeInsets.only(bottom: 6)),
         for (final d in nodes)
           Draggable<(String, Offset)>(
             key: ValueKey('palette_${d.nodeType}'),
@@ -389,12 +435,22 @@ class _NodeCard extends StatelessWidget {
     if (d == null) return const SizedBox();
     final rows = math.max(d.inputs.length, d.outputs.length);
     final height = 34.0 + math.max(rows, 1) * _portGap;
+    // Suivi absolu du pointeur : position de départ capturée au geste,
+    // position finale = départ + (curseur - curseur départ). Le nœud suit
+    // exactement la souris (pas de perte du pré-pan, pas d'incrément cumulatif).
+    NodePos? dragOrigin;
+    Offset? pointerOrigin;
     return GestureDetector(
       // TOUTE la carte est prenable : l'en-tête limite la prise sinon.
       behavior: HitTestBehavior.opaque,
-      onPanUpdate: (delta) {
-        onMoved(NodePos(node.pos.dx + delta.delta.dx,
-            node.pos.dy + delta.delta.dy));
+      onPanStart: (details) {
+        dragOrigin = NodePos(node.pos.dx, node.pos.dy);
+        pointerOrigin = details.globalPosition;
+      },
+      onPanUpdate: (details) {
+        if (dragOrigin == null || pointerOrigin == null) return;
+        final dPos = details.globalPosition - pointerOrigin!;
+        onMoved(NodePos(dragOrigin!.dx + dPos.dx, dragOrigin!.dy + dPos.dy));
       },
       onDoubleTap: onEdit,
       child: Container(
