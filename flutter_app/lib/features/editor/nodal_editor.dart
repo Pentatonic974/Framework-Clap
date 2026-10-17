@@ -82,13 +82,19 @@ class _NodalEditorState extends ConsumerState<NodalEditor> {
         const _Palette(),
         VerticalDivider(width: 1, color: borderColor),
         Expanded(
-          child: DragTarget<String>(
+          child: DragTarget<(String, Offset)>(
             onWillAcceptWithDetails: (_) => true,
             onAcceptWithDetails: (details) {
-              final nodeType = details.data;
+              final nodeType = details.data.$1;
+              // Position de dépôt = curseur, en coordonnées du canvas.
+              final box = context.findRenderObject() as RenderBox?;
+              if (box == null) return;
+              final local = box.globalToLocal(details.offset);
               ref
                   .read(projectProvider.notifier)
-                  .addNode(nodeType, const NodePos(340, 230));
+                  .addNode(nodeType, NodePos(
+                      local.dx.clamp(0, box.size.width - 220),
+                      local.dy.clamp(0, box.size.height - 120)));
             },
             builder: (context, candidates, _) {
               final highlight = candidates.isNotEmpty;
@@ -228,10 +234,17 @@ class _CategoryGroup extends StatelessWidget {
         Container(
             height: 1, color: borderColor, margin: const EdgeInsets.only(bottom: 6)),
         for (final d in nodes)
-          Draggable<String>(
+          Draggable<(String, Offset)>(
             key: ValueKey('palette_${d.nodeType}'),
-            data: d.nodeType,
-            feedback: _PaletteItem(def: d, elevated: true),
+            data: (d.nodeType, Offset.zero),
+            feedback: MouseRegion(
+              cursor: SystemMouseCursors.grabbing,
+              child: Material(
+                color: Colors.transparent,
+                child: _PaletteItem(def: d, elevated: true),
+              ),
+            ),
+            dragAnchorStrategy: pointerDragAnchorStrategy,
             childWhenDragging: Opacity(opacity: 0.4, child: _PaletteItem(def: d, elevated: false)),
             child: _PaletteItem(def: d, elevated: false),
           ),
