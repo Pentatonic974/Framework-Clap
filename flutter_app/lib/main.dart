@@ -52,9 +52,9 @@ class StudioShell extends ConsumerWidget {
         // ------------- header -------------
         Container(
           height: 50,
-          color: bgPanel,
           padding: const EdgeInsets.symmetric(horizontal: 16),
           decoration: const BoxDecoration(
+            color: bgPanel,
             border: Border(bottom: BorderSide(color: borderColor)),
           ),
           child: Row(
