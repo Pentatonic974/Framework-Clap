@@ -340,6 +340,8 @@ class _RackWidgetState extends ConsumerState<RackWidget> {
         dragOriginCell = RackPos(w.col, w.row);
         pointerOrigin = details.globalPosition;
       },
+      onPanEnd: (_) { dragOriginCell = null; pointerOrigin = null; },
+      onPanCancel: () { dragOriginCell = null; pointerOrigin = null; },
       onPanUpdate: (details) {
         if (dragOriginCell == null || pointerOrigin == null) return;
         final d = details.globalPosition - pointerOrigin!;

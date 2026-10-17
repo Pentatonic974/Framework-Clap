@@ -2,14 +2,13 @@
 /// nœuds déplaçables, connexion interactive sortie -> entrée.
 library;
 
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/app_theme.dart';
 import '../../core/node_registry.dart';
 import '../../core/project_model.dart';
+import 'draggable_node_card.dart';
 import 'editor_state.dart';
 
 const _nodeWidth = 180.0;
@@ -126,12 +125,15 @@ class _NodalEditorState extends ConsumerState<NodalEditor> {
                       size: Size.infinite,
                       painter: _WiresPainter(spec: spec, defOf: _def),
                     ),
-                    // nœuds
+                    // nœuds (DraggableNodeCard : widget à état, le drag
+                    // survit aux rebuilds déclenchés par onMoved)
                     for (final n in spec.nodes)
                       Positioned(
+                        key: ValueKey('node_${n.id}'),
                         left: n.pos.dx,
                         top: n.pos.dy,
-                        child: _NodeCard(
+                        child: DraggableNodeCard(
+                          key: ValueKey('card_${n.id}'),
                           node: n,
                           def: _def(n.nodeType),
                           highlightKind:
@@ -410,203 +412,6 @@ class _HeaderChip extends StatelessWidget {
         child: Text(label, style: const TextStyle(fontSize: 12, color: textMuted)),
       ),
     );
-  }
-}
-
-/// Carte de nœud : en-tête déplacable (Pan), ports cliquables, suppression.
-class _NodeCard extends StatelessWidget {
-  final NodeInstance node;
-  final NodeDef? def;
-  final PortKind? highlightKind;
-  final ValueChanged<NodePos> onMoved;
-  final void Function(int port, bool isOutput) onPortTap;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
-
-  const _NodeCard({
-    required this.node,
-    required this.def,
-    required this.highlightKind,
-    required this.onMoved,
-    required this.onPortTap,
-    required this.onEdit,
-    required this.onDelete,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final d = def;
-    if (d == null) return const SizedBox();
-    final rows = math.max(d.inputs.length, d.outputs.length);
-    final height = 34.0 + math.max(rows, 1) * _portGap;
-    // Suivi absolu du pointeur : position de départ capturée au geste,
-    // position finale = départ + (curseur - curseur départ). Le nœud suit
-    // exactement la souris (pas de perte du pré-pan, pas d'incrément cumulatif).
-    NodePos? dragOrigin;
-    Offset? pointerOrigin;
-    return GestureDetector(
-      // TOUTE la carte est prenable : l'en-tête limite la prise sinon.
-      behavior: HitTestBehavior.opaque,
-      onPanStart: (details) {
-        dragOrigin = NodePos(node.pos.dx, node.pos.dy);
-        pointerOrigin = details.globalPosition;
-      },
-      onPanUpdate: (details) {
-        if (dragOrigin == null || pointerOrigin == null) return;
-        final dPos = details.globalPosition - pointerOrigin!;
-        onMoved(NodePos(dragOrigin!.dx + dPos.dx, dragOrigin!.dy + dPos.dy));
-      },
-      onDoubleTap: onEdit,
-      child: Container(
-      width: _nodeWidth,
-      height: height,
-      decoration: BoxDecoration(
-        color: bgPanel,
-        border: Border.all(color: borderColor),
-        borderRadius: BorderRadius.circular(6),
-        boxShadow: const [BoxShadow(blurRadius: 12, color: Colors.black54)],
-      ),
-      child: Column(
-        children: [
-          Container(
-            height: 24,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            decoration: const BoxDecoration(
-              color: Color(0xFF252834),
-              borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(6), topRight: Radius.circular(6)),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(d.displayName,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w600, fontSize: 11)),
-                ),
-                InkWell(onTap: onEdit,
-                  child: const Icon(Icons.edit, size: 13, color: textMuted),
-                ),
-                InkWell(onTap: onDelete,
-                  child: const Icon(Icons.close, size: 14, color: textMuted),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        for (final (i, port) in d.inputs.indexed)
-                          _PortDot(
-                            label: port.name,
-                            kind: port.kind,
-                            isOutput: false,
-                            highlighted:
-                                highlightKind != null && port.kind == highlightKind,
-                            onTap: () => onPortTap(i, false),
-                          ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        for (final (i, port) in d.outputs.indexed)
-                          _PortDot(
-                            label: port.name,
-                            kind: port.kind,
-                            isOutput: true,
-                            highlighted: false,
-                            onTap: () => onPortTap(i, true),
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-      ),
-    );
-  }
-}
-
-/// Port cliquable : dot coloré + libellé (couleur = type de signal).
-class _PortDot extends StatelessWidget {
-  final String label;
-  final PortKind kind;
-  final bool isOutput;
-  final bool highlighted;
-  final VoidCallback onTap;
-
-  const _PortDot({
-    required this.label,
-    required this.kind,
-    required this.isOutput,
-    required this.highlighted,
-    required this.onTap,
-  });
-
-  static Color colorFor(PortKind kind) {
-    switch (kind) {
-      case PortKind.audio:
-        return accentOrange;
-      case PortKind.control:
-        return accentBlue;
-      case PortKind.event:
-        return accentPurple;
-      case PortKind.data:
-        return accentGreen;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final dot = GestureDetector(
-      onTap: onTap,
-      child: MouseRegion(
-        cursor: SystemMouseCursors.precise,
-        child: Container(
-          width: 10,
-          height: 10,
-          margin: highlighted
-              ? const EdgeInsets.all(1)
-              : EdgeInsets.zero,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: colorFor(kind),
-            border: highlighted
-                ? Border.all(color: Colors.white, width: 1.2)
-                : null,
-          ),
-        ),
-      ),
-    );
-
-    final label = Expanded(
-      child: Text(this.label,
-          overflow: TextOverflow.ellipsis,
-          textAlign: isOutput ? TextAlign.right : TextAlign.left,
-          style: const TextStyle(fontSize: 10, color: textMuted)),
-    );
-
-    final row = isOutput
-        ? Row(children: [label, const SizedBox(width: 4), dot])
-        : Row(children: [dot, const SizedBox(width: 4), label]);
-
-    return SizedBox(height: _portGap, child: Align(child: row));
   }
 }
 
