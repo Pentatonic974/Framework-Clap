@@ -68,16 +68,21 @@ C:/Repo/Framework Clap/
 ## 4. Commands de vérification (statuts vérifiés au dernier run)
 
 ```bash
+# Lanceur utilisateur (double-clic, ou "rebuild" pour forcer la compilation)
+lancer_framework.bat              # racine du projet — app claps_studio.exe
+
+# Vérifications manuelles :
 cd "C:/Repo/Framework Clap/rust"
 cargo build --workspace          # ✓
 cargo test --workspace           # ✓ 12/12 (graph-core 8, dsp 2, engine 2)
 cargo run -q -p build-service -- demo-project.json --formats clap --no-install
                                  # ✓ exit 0 → rust/target/claps/DemoGain.clap
 
+```bash
 cd ../flutter_app
-flutter analyze                  # ✓ 0 erreur 0 warning
-flutter test                     # ✓ 3/3
-flutter build windows --debug    # ✓ claps_studio.exe
+flutter analyze
+flutter test
+flutter build windows --debug
 ```
 
 ## 5. Pièges connus / leçons
