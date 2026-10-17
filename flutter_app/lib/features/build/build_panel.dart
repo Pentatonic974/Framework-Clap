@@ -10,9 +10,10 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
 
+import '../../core/app_status.dart';
 import '../../core/app_theme.dart';
+import '../../core/project_io.dart';
 import '../editor/editor_state.dart';
 
 class BuildReport {
@@ -37,38 +38,18 @@ class BuildController extends Notifier<BuildReport?> {
   @override
   BuildReport? build() => null;
 
-  /// Cherche la racine du monorepo (contenant rust/Cargo.toml) en remontant
-  /// depuis le répertoire temporaire de l'app (sync beats : 6 niveaux max).
-  Future<String?> _workspaceRoot() async {
-    final probeDirs = [
-      (await getTemporaryDirectory()).path,
-      Platform.resolvedExecutable,
-      Directory.current.path,
-    ];
-    final candidates = <String>[];
-    for (final p in probeDirs) {
-      var d = p;
-      for (int i = 0; i < 6; i++) {
-        candidates.add(d);
-        if (d.endsWith(':\\') || d == '/') break;
-        d = Directory(d).parent.path;
-      }
-    }
-    for (final c in candidates) {
-      if (await File('$c/rust/Cargo.toml').exists()) return c;
-    }
-    return null;
-  }
-
   Future<void> run(String projectJson) async {
     if (running) return;
     running = true;
+    final status = ref.read(clapsStatusProvider.notifier);
     try {
-      final tmp = await getTemporaryDirectory();
+      final tmp = Directory.systemTemp;
       final file = File('${tmp.path}/claps_project.json');
       await file.writeAsString(projectJson);
-      final root = await _workspaceRoot();
+      final root = await ProjectIO.workspaceRoot();
       if (root == null) {
+        status.set(
+            'workspace Rust introuvable (rust/Cargo.toml) — lancez l\'app depuis le dépôt');
         state = BuildReport(
           ok: false,
           formatOk: const [],
@@ -77,6 +58,7 @@ class BuildController extends Notifier<BuildReport?> {
         );
         return;
       }
+      status.set('Build CLAP en cours (cargo build --release)…');
       final res = await Process.run('cargo', [
         'run',
         '-q',
@@ -98,7 +80,7 @@ class BuildController extends Notifier<BuildReport?> {
           : out;
       try {
         final parse = jsonDecode(body) as Map<String, dynamic>;
-        state = BuildReport(
+        final report = BuildReport(
           ok: (parse['ok'] ?? false) as bool,
           formatOk: (parse['format_ok'] as List?)?.cast<String>() ?? const [],
           warnings: (parse['warnings'] as List?)?.cast<String>() ?? const [],
@@ -106,6 +88,13 @@ class BuildController extends Notifier<BuildReport?> {
           artifactPath: parse['artifact_path'] as String?,
           installPath: parse['install_path'] as String?,
         );
+        state = report;
+        if (report.ok) {
+          status.set(
+              'Build OK : ${report.artifactPath ?? '?'}${report.installPath != null ? ' → ${report.installPath}' : ''}');
+        } else {
+          status.set('Build échoué : ${report.errors.join(' | ')}');
+        }
       } catch (_) {
         state = BuildReport(
           ok: false,
@@ -113,6 +102,7 @@ class BuildController extends Notifier<BuildReport?> {
           warnings: [if (errout.isNotEmpty) errout],
           errors: ['build-service : sortie illisible ou échec de compilation'],
         );
+        status.set('Build échoué (sortie illisible) — voir le panneau');
       }
     } catch (e) {
       state = BuildReport(
@@ -121,6 +111,7 @@ class BuildController extends Notifier<BuildReport?> {
         warnings: const [],
         errors: ['bridge : $e'],
       );
+      status.set('Erreur du pont de build : $e');
     } finally {
       running = false;
     }
@@ -136,6 +127,7 @@ class BuildPanel extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final validation = ref.watch(validationProvider);
     final report = ref.watch(buildProvider);
+    final project = ref.watch(projectProvider);
     return Container(
       color: bgPanel,
       padding: const EdgeInsets.all(12),
@@ -147,9 +139,7 @@ class BuildPanel extends ConsumerWidget {
             const Divider(color: borderColor),
             FilledButton.icon(
               style: FilledButton.styleFrom(backgroundColor: accentOrange),
-              icon: report == null
-                  ? const Icon(Icons.build_circle_outlined)
-                  : const Icon(Icons.refresh),
+              icon: const Icon(Icons.build_circle_outlined),
               label: const Text('Build Plugin (.clap)'),
               onPressed: validation.errors.isNotEmpty
                   ? null
@@ -158,28 +148,24 @@ class BuildPanel extends ConsumerWidget {
             ),
             const SizedBox(height: 6),
             OutlinedButton.icon(
-              icon: const Icon(Icons.copy, size: 16),
-              label: const Text('Exporter le projet (JSON)'),
-              onPressed: () {
-                showDialog(
-                  context: context,
-                  builder: (_) => AlertDialog(
-                    backgroundColor: bgPanel,
-                    title: const Text('Projet (GraphSpec JSON)'),
-                    content: SizedBox(
-                      width: 480,
-                      child: SelectableText(
-                        ref.read(projectProvider).spec.toPrettyJson(),
-                        style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
-                      ),
-                    ),
-                    actions: [
-                      TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text('Fermer')),
-                    ],
-                  ),
-                );
+              icon: const Icon(Icons.save, size: 16),
+              label: const Text('Enregistrer le projet (JSON)'),
+              onPressed: () async {
+                final path = await ProjectIO.defaultProjectPath(
+                    ref.read(projectProvider).spec.meta.name);
+                if (path == null) {
+                  ref.read(clapsStatusProvider.notifier)
+                      .set('Impossible de trouver la racine du projet (Cargo.toml)');
+                  return;
+                }
+                final ok = await ProjectIO.writeProject(
+                    path, ref.read(projectProvider).spec.toPrettyJson());
+                if (ok) {
+                  ref.read(projectProvider.notifier).setFilePath(path);
+                  ref.read(clapsStatusProvider.notifier).set('Projet enregistré : $path');
+                } else {
+                  ref.read(clapsStatusProvider.notifier).set('Échec d\'écriture : $path');
+                }
               },
             ),
             const SizedBox(height: 12),
@@ -205,11 +191,19 @@ class BuildPanel extends ConsumerWidget {
               if (report.artifactPath != null)
                 Text('Artefact : ${report.artifactPath}'),
               if (report.installPath != null) Text('Installé : ${report.installPath}'),
+              if (report.installPath == null && report.ok)
+                const Text('(--no-install ou chemin refusé — copier manuellement)',
+                    style: TextStyle(fontSize: 10, color: textMuted)),
               for (final e in report.errors)
                 Text(e, style: const TextStyle(color: Color(0xFFEF5350), fontSize: 11)),
               for (final w in report.warnings)
                 Text(w, style: const TextStyle(color: textMuted, fontSize: 11)),
             ],
+            const SizedBox(height: 10),
+            Text(
+              'Chemin du projet : ${project.filePath.isEmpty ? '(non enregistré)' : project.filePath}',
+              style: const TextStyle(fontSize: 10, color: textMuted),
+            ),
           ],
         ),
       ),

@@ -35,6 +35,20 @@ class _NodalEditorState extends ConsumerState<NodalEditor> {
 
   NodeDef? _def(String? type) => type == null ? null : ClapNodeRegistry.byType(type);
 
+  /// Double-clic sur la carte nœud : dialogue d'édition des réglages du
+  /// registre (params intrinsèques) + exposition des paramètres CLAP.
+  Future<void> _editNode(NodeInstance node) async {
+    final def = _def(node.nodeType);
+    if (def == null) return;
+    final result = await showDialog<_NodeEdit>(
+      context: context,
+      builder: (_) => _NodeEditDialog(node: node, def: def),
+    );
+    if (result == null) return;
+    ref.read(projectProvider.notifier).applyNodeEdit(
+        node.id, NodeEditResult(result.params, result.exposed));
+  }
+
   void _onPortTap(NodeInstance node, int portIndex, bool isOutput) {
     final notifier = ref.read(projectProvider.notifier);
     final pending = pendingOutput;
@@ -115,6 +129,7 @@ class _NodalEditorState extends ConsumerState<NodalEditor> {
                           onMoved: (pos) =>
                               ref.read(projectProvider.notifier).moveNode(n.id, pos),
                           onPortTap: (port, isOutput) => _onPortTap(n, port, isOutput),
+                          onEdit: () => _editNode(n),
                           onDelete: () =>
                               ref.read(projectProvider.notifier).removeNode(n.id),
                         ),
@@ -342,6 +357,7 @@ class _NodeCard extends StatelessWidget {
   final PortKind? highlightKind;
   final ValueChanged<NodePos> onMoved;
   final void Function(int port, bool isOutput) onPortTap;
+  final VoidCallback onEdit;
   final VoidCallback onDelete;
 
   const _NodeCard({
@@ -350,6 +366,7 @@ class _NodeCard extends StatelessWidget {
     required this.highlightKind,
     required this.onMoved,
     required this.onPortTap,
+    required this.onEdit,
     required this.onDelete,
   });
 
@@ -372,6 +389,7 @@ class _NodeCard extends StatelessWidget {
         children: [
           GestureDetector(
             behavior: HitTestBehavior.opaque,
+            onDoubleTap: onEdit,
             onPanUpdate: (delta) {
               onMoved(NodePos(node.pos.dx + delta.delta.dx,
                   node.pos.dy + delta.delta.dy));
@@ -391,6 +409,9 @@ class _NodeCard extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                             fontWeight: FontWeight.w600, fontSize: 11)),
+                  ),
+                  InkWell(onTap: onEdit,
+                    child: const Icon(Icons.edit, size: 13, color: textMuted),
                   ),
                   InkWell(onTap: onDelete,
                     child: const Icon(Icons.close, size: 14, color: textMuted),
@@ -512,5 +533,148 @@ class _PortDot extends StatelessWidget {
         : Row(children: [dot, const SizedBox(width: 4), label]);
 
     return SizedBox(height: _portGap, child: Align(child: row));
+  }
+}
+
+/// Résultat d'édition d'un nœud (réglages + exposés).
+class _NodeEdit {
+  final Map<String, double> params;
+  final List<ParamDef> exposed;
+  const _NodeEdit(this.params, this.exposed);
+}
+
+/// Dialogue Inspector : réglage des paramètres intrinsèques du registre
+/// (valeur numérique) et cases « exposé au host (CLAP) ».
+class _NodeEditDialog extends StatefulWidget {
+  final NodeInstance node;
+  final NodeDef def;
+
+  const _NodeEditDialog({required this.node, required this.def});
+
+  @override
+  State<_NodeEditDialog> createState() => _NodeEditDialogState();
+}
+
+class _NodeEditDialogState extends State<_NodeEditDialog> {
+  late final Map<String, double> _values;
+  late final Set<String> _exposed;
+
+  @override
+  void initState() {
+    super.initState();
+    _values = {
+      for (final p in widget.def.params)
+        p.paramId: (widget.node.params[p.paramId] ?? p.defaultValue)
+            .clamp(p.min, p.max),
+    };
+    _exposed = {
+      for (final e in widget.node.exposedParams) e.paramId,
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final def = widget.def;
+    return AlertDialog(
+      backgroundColor: bgPanel,
+      title: Text(def.displayName, style: const TextStyle(fontSize: 16)),
+      content: SizedBox(
+        width: 460,
+        child: def.params.isEmpty
+            ? const Text('Ce nœud n\'a aucun réglage.',
+                style: TextStyle(fontSize: 12, color: textMuted))
+            : SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final p in def.params) ...[
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(p.name,
+                                style: const TextStyle(fontSize: 12)),
+                          ),
+                          Checkbox(
+                            value: _exposed.contains(p.paramId),
+                            onChanged: (v) => setState(() =>
+                                v == true
+                                    ? _exposed.add(p.paramId)
+                                    : _exposed.remove(p.paramId)),
+                          ),
+                          const Text('CLAP',
+                              style:
+                                  TextStyle(fontSize: 10, color: textMuted)),
+                        ],
+                      ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Slider(
+                              value: _values[p.paramId]!.clamp(p.min, p.max),
+                              min: p.min,
+                              max: p.max,
+                              divisions: p.step <= 0
+                                  ? null
+                                  : ((p.max - p.min) / p.step).round().clamp(1, 2000),
+                              onChanged: (v) =>
+                                  setState(() => _values[p.paramId] = v),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 74,
+                            child: Text(
+                              _values[p.paramId]!.toStringAsFixed(2),
+                              textAlign: TextAlign.right,
+                              style: const TextStyle(
+                                  fontFamily: 'monospace',
+                                  fontSize: 11,
+                                  color: accentGreen),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                    ],
+                  ],
+                ),
+              ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Annuler')),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: accentOrange),
+          onPressed: () {
+            final exposed = [
+              for (final id in _exposed)
+                () {
+                  final p =
+                      def.params.firstWhere((x) => x.paramId == id);
+                  return ParamDef(
+                    paramId: p.paramId,
+                    name: p.name,
+                    defaultValue: _values[p.paramId] ?? p.defaultValue,
+                    min: p.min,
+                    max: p.max,
+                    step: p.step,
+                  );
+                }(),
+            ];
+            Navigator.pop(
+                context,
+                _NodeEdit(
+                  {
+                    for (final p in def.params)
+                      p.paramId: _values[p.paramId] ?? p.defaultValue,
+                  },
+                  exposed,
+                ));
+          },
+          child: const Text('Appliquer'),
+        ),
+      ],
+    );
   }
 }

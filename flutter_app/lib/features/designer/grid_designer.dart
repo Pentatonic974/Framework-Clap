@@ -1,18 +1,24 @@
-/// Designer de grille GUI : rack du plugin, widgets posés sur une grille,
-/// mapping dynamique vers les identifiants de paramètres CLAP.
+/// Designer de grille GUI : rack du plugin, widgets posés par drag-and-drop
+/// à la position du curseur, édition du label (double-clic), mapping vers
+/// les paramètres CLAP exposés, suppression. Les visualiseurs pointent un
+/// nœud d'analyse, les contrôles un paramètre "nodeId/paramId".
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/app_status.dart';
 import '../../core/app_theme.dart';
 import '../../core/node_registry.dart';
 import '../../core/project_model.dart';
 import '../editor/editor_state.dart';
 
-/// Éditeur de rack : encadré 320x420, widgets drag-and-drop, édition du label
-/// et du param mappé. Les widgets pointent vers "nodeId/paramId" quand ils
-/// deviennent un contrôle, ou vers nodeId pour la mesure.
+/// Édition d'une cellule du rack (null = cellule vide, pas de widget).
+class RackPos {
+  final int col, row;
+  const RackPos(this.col, this.row);
+}
+
 class GridDesigner extends ConsumerStatefulWidget {
   const GridDesigner({super.key});
 
@@ -21,40 +27,102 @@ class GridDesigner extends ConsumerStatefulWidget {
 }
 
 class _GridDesignerState extends ConsumerState<GridDesigner> {
+  static const cellW = 40.0;
+  static const cellH = 40.0;
+  static const cols = 8;
+  static const rows = 10;
+
+  /// Cellule sous un offset local du rack (clamp aux bornes).
+  static RackPos _cellFrom(Offset local) => RackPos(
+        (local.dx / cellW).floor().clamp(0, cols - 1),
+        (local.dy / cellH).floor().clamp(0, rows - 1),
+      );
+
+  void _addWidgetAt(String type, RackPos cell) {
+    final notifier = ref.read(projectProvider.notifier);
+    final label = _defaultLabel(type);
+    final id = notifier.nextId('w');
+    notifier.addWidget(GuiWidget(
+      id: id,
+      widgetType: type,
+      label: label,
+      col: cell.col,
+      row: cell.row,
+      colSpan: type == 'knob' ? 2 : 2,
+      rowSpan: type == 'knob' ? 2 : 1,
+    ));
+    notifier.bumpIds();
+    // S'il n'y a aucun paramètre exposé, on en propose dans le dialogue d'édition.
+    final spec = ref.read(projectProvider).spec;
+    if (seedParamCapable(type) && exposedParamsMap(spec).isEmpty) {
+      setStatus(ref, 'Widget posé : mappez-le à un param CLAP (icône maillon).');
+    }
+  }
+
+  static String _defaultLabel(String type) {
+    for (final (t, name, _) in GuiRegistry.widgets) {
+      if (t == type) return name.split(' (').first;
+    }
+    return type;
+  }
+
   @override
   Widget build(BuildContext context) {
     final spec = ref.watch(projectProvider).spec;
     final params = exposedParamsMap(spec);
-    const cellW = 40.0;
-    const cellH = 40.0;
-    const cols = 8;
-    const rows = 10;
+    // Nœuds d'analyse disponibles pour les visualiseurs.
+    final analysisNodes = <String, String>{
+      for (final n in spec.nodes)
+        if (_isAnalysisNode(n.nodeType)) n.id : n.nodeType,
+    };
 
     final rack = SizedBox(
       width: cols * cellW,
       height: rows * cellH,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          const _GridBackground(cols: cols, rows: rows, cellW: cellW, cellH: cellH),
-          for (final w in spec.guiWidgets)
-            Positioned(
-              left: w.col * cellW,
-              top: w.row * cellH,
-              width: _spanWidth(w, cols) * cellW,
-              height: _spanHeight(w, rows) * cellH,
-              child: RackWidget(
-                widget: w,
-                params: params,
-                onMoved: (col, row) =>
-                    ref.read(projectProvider.notifier).moveWidget(w.id, col, row),
-                onAssignParam: (paramId) =>
-                    ref.read(projectProvider.notifier).assignParam(w.id, paramId),
-                onDelete: () =>
-                    ref.read(projectProvider.notifier).removeWidget(w.id),
+      child: DragTarget<(String, Offset)>(
+        onWillAcceptWithDetails: (_) => true,
+        onAcceptWithDetails: (details) {
+          final box = context.findRenderObject() as RenderBox?;
+          if (box == null) return;
+          final local = box.globalToLocal(details.offset);
+          final cell = _cellFrom(local);
+          _addWidgetAt(details.data.$1, cell);
+        },
+        builder: (context, candidates, _) {
+          final highlight = candidates.isNotEmpty;
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned.fill(
+                child: CustomPaint(
+                  painter: _GridPainter(
+                    cols: cols, rows: rows, cellW: cellW, cellH: cellH,
+                    highlight: highlight,
+                  ),
+                ),
               ),
-            ),
-        ],
+              for (final w in spec.guiWidgets)
+                Positioned(
+                  left: w.col * cellW,
+                  top: w.row * cellH,
+                  width: _spanWidth(w, cols) * cellW,
+                  height: _spanHeight(w, rows) * cellH,
+                  child: RackWidget(
+                    widget: w,
+                    params: params,
+                    analysisNodes: analysisNodes,
+                    onMoved: (col, row) =>
+                        ref.read(projectProvider.notifier).moveWidget(w.id, col, row),
+                    onEdited: () => _editWidget(w, params, analysisNodes),
+                    onAssignParam: (paramId) =>
+                        ref.read(projectProvider.notifier).assignParam(w.id, paramId),
+                    onDelete: () =>
+                        ref.read(projectProvider.notifier).removeWidget(w.id),
+                  ),
+                ),
+            ],
+          );
+        },
       ),
     );
 
@@ -79,12 +147,16 @@ class _GridDesignerState extends ConsumerState<GridDesigner> {
                 for (final (type, name, _) in GuiRegistry.widgets)
                   Padding(
                     padding: const EdgeInsets.only(right: 6),
-                    child: Draggable<String>(
-                      data: type,
-                      feedback: Material(
-                        color: Colors.transparent,
-                        child: _PaletteChip(label: name, dragging: true),
+                    child: Draggable<(String, Offset)>(
+                      data: (type, Offset.zero),
+                      feedback: MouseRegion(
+                        cursor: SystemMouseCursors.grabbing,
+                        child: Material(
+                          color: Colors.transparent,
+                          child: _PaletteChip(label: name, dragging: true),
+                        ),
                       ),
+                      dragAnchorStrategy: pointerDragAnchorStrategy,
                       child: _PaletteChip(label: name, dragging: false),
                     ),
                   ),
@@ -93,27 +165,72 @@ class _GridDesignerState extends ConsumerState<GridDesigner> {
           ),
           const SizedBox(height: 8),
           // Titre du rack (plugin-title de la maquette : orange, centré).
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '${spec.meta.name.toUpperCase()}.CLAP',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w700, color: accentOrange),
-              ),
-              const SizedBox(height: 10),
-              rack,
-            ],
+          Text(
+            '${spec.meta.name.toUpperCase()}.CLAP',
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+                fontSize: 13, fontWeight: FontWeight.w700, color: accentOrange),
           ),
+          const SizedBox(height: 10),
+          Expanded(child: Center(child: rack)),
         ],
       ),
     );
   }
+
+  Future<void> _editWidget(
+    GuiWidget w,
+    Map<String, (NodeInstance, ParamDef)> params,
+    Map<String, String> analysisNodes,
+  ) async {
+    final result = await showDialog<_WidgetEdit>(
+      context: context,
+      builder: (_) => _EditDialog(widget: w, params: params, analysisNodes: analysisNodes),
+    );
+    if (result == null) return;
+    final notifier = ref.read(projectProvider.notifier);
+    notifier.assignParam(w.id, result.paramId);
+    if (result.label != w.label) {
+      final widgets = [...ref.read(projectProvider).spec.guiWidgets];
+      final i = widgets.indexWhere((x) => x.id == w.id);
+      if (i >= 0) {
+        final old = widgets[i];
+        widgets[i] = GuiWidget(
+          id: old.id, widgetType: old.widgetType, label: result.label,
+          paramId: old.paramId, col: old.col, row: old.row,
+          colSpan: old.colSpan, rowSpan: old.rowSpan,
+        );
+        // Injection directe via le modèle du state :
+        final spec = ref.read(projectProvider).spec;
+        spec.guiWidgets
+          ..clear()
+          ..addAll(widgets);
+      }
+    }
+  }
 }
+
+class _WidgetEdit {
+  final String paramId;
+  final String label;
+  const _WidgetEdit(this.paramId, this.label);
+}
+
+bool _isAnalysisNode(String nodeType) =>
+    const ['peak_rms_meter', 'oscilloscope', 'lufs_meter', 'goniometer', 'fft_analyzer']
+        .contains(nodeType);
+
+/// Un widget contrôleur a besoin d'un paramètre CLAP exposé.
+bool seedParamCapable(String type) => GuiRegistry.paramCapable(type);
 
 int _spanWidth(GuiWidget w, int cols) => w.colSpan.clamp(1, cols - w.col);
 int _spanHeight(GuiWidget w, int rows) => w.rowSpan.clamp(1, rows - w.row);
+
+void setStatus(WidgetRef ref, String v) {
+  // Injection douce dans le footer global (défini dans main.dart).
+  // On passe par un Provider nommé pour éviter une dépendance circulaire.
+  ref.read(clapsStatusProvider.notifier).set(v);
+}
 
 Map<String, (NodeInstance, ParamDef)> exposedParamsMap(GraphSpec spec) {
   final out = <String, (NodeInstance, ParamDef)>{};
@@ -125,37 +242,26 @@ Map<String, (NodeInstance, ParamDef)> exposedParamsMap(GraphSpec spec) {
   return out;
 }
 
-class _GridBackground extends StatelessWidget {
-  final int cols, rows;
-  final double cellW, cellH;
-
-  const _GridBackground(
-      {required this.cols, required this.rows, required this.cellW, required this.cellH});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: cols * cellW,
-      height: rows * cellH,
-      child: CustomPaint(
-        painter: _GridPainter(cols: cols, rows: rows, cellW: cellW, cellH: cellH),
-        child: const SizedBox.expand(),
-      ),
-    );
-  }
-}
-
 class _GridPainter extends CustomPainter {
   final int cols, rows;
   final double cellW, cellH;
+  final bool highlight;
 
-  const _GridPainter({required this.cols, required this.rows, required this.cellW, required this.cellH});
+  const _GridPainter({
+    required this.cols,
+    required this.rows,
+    required this.cellW,
+    required this.cellH,
+    required this.highlight,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
       ..strokeWidth = 1.0
-      ..color = borderColor.withValues(alpha: 0.5);
+      ..color = highlight
+          ? borderColor.withValues(alpha: 0.8)
+          : borderColor.withValues(alpha: 0.5);
     for (int c = 0; c <= cols; c++) {
       canvas.drawLine(Offset(c * cellW, 0), Offset(c * cellW, rows * cellH), paint);
     }
@@ -166,7 +272,7 @@ class _GridPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _GridPainter oldDelegate) =>
-      oldDelegate.cols != cols || oldDelegate.cellW != cellW;
+      oldDelegate.highlight != highlight || oldDelegate.cols != cols;
 }
 
 class _HeaderChip extends StatelessWidget {
@@ -191,11 +297,14 @@ class _HeaderChip extends StatelessWidget {
   }
 }
 
-/// Widget du rack : rendu selon type, interactions (drag, mapping, delete).
+/// Widget du rack : rendu selon type, interactions (drag déplacement,
+/// double-clic édition, mapping param, delete).
 class RackWidget extends ConsumerStatefulWidget {
   final GuiWidget widget;
   final Map<String, (NodeInstance, ParamDef)> params;
+  final Map<String, String> analysisNodes;
   final void Function(int col, int row) onMoved;
+  final VoidCallback onEdited;
   final void Function(String paramId) onAssignParam;
   final VoidCallback onDelete;
 
@@ -203,7 +312,9 @@ class RackWidget extends ConsumerStatefulWidget {
     super.key,
     required this.widget,
     required this.params,
+    required this.analysisNodes,
     required this.onMoved,
+    required this.onEdited,
     required this.onAssignParam,
     required this.onDelete,
   });
@@ -213,16 +324,14 @@ class RackWidget extends ConsumerStatefulWidget {
 }
 
 class _RackWidgetState extends ConsumerState<RackWidget> {
-
   @override
   Widget build(BuildContext context) {
     final w = widget.widget;
     return GestureDetector(
+      onDoubleTap: widget.onEdited,
       onPanUpdate: (delta) {
-        const cell = 40.0;
-        final target = ((w.col + delta.delta.dx / cell).round()).clamp(0, 7);
-        final targetRow = ((w.row + delta.delta.dy / cell).round()).clamp(0, 9);
-        widget.onMoved(target, targetRow);
+        final cell = _nearestCell(w, delta.delta);
+        widget.onMoved(cell.col, cell.row);
       },
       child: MouseRegion(
         cursor: SystemMouseCursors.grab,
@@ -244,32 +353,50 @@ class _RackWidgetState extends ConsumerState<RackWidget> {
                         textAlign: TextAlign.center,
                         style: const TextStyle(fontSize: 10, color: textMuted)),
                   ),
-                  PopupMenuButton<String>(
-                    icon: const Icon(Icons.link, size: 12, color: accentOrange),
-                    tooltip: 'Mapper le paramètre CLAP',
-                    onSelected: widget.onAssignParam,
-                    itemBuilder: (_) => [
-                      for (final entry in widget.params.entries)
-                        PopupMenuItem<String>(
-                          value: entry.key,
-                          height: 32,
-                          child: Text(
-                              '${entry.value.$2.name} (${entry.value.$1.id})',
-                              style: const TextStyle(fontSize: 12)),
-                        ),
-                    ],
+                  if (GuiRegistry.paramCapable(w.widgetType))
+                    PopupMenuButton<String>(
+                      icon: const Icon(Icons.link, size: 12, color: accentOrange),
+                      tooltip: 'Mapper le paramètre CLAP',
+                      onSelected: widget.onAssignParam,
+                      itemBuilder: (_) => [
+                        if (widget.params.isEmpty)
+                          const PopupMenuItem<String>(
+                            enabled: false,
+                            height: 32,
+                            child: Text('Aucun param exposé (exposez un nœud)',
+                                style: TextStyle(fontSize: 11)),
+                          ),
+                        for (final entry in widget.params.entries)
+                          PopupMenuItem<String>(
+                            value: entry.key,
+                            height: 32,
+                            child: Text(
+                                '${entry.value.$2.name} (${entry.key})',
+                                style: const TextStyle(fontSize: 12)),
+                          ),
+                      ],
+                    ),
+                  InkWell(onTap: widget.onEdited,
+                    child: const Icon(Icons.edit, size: 12, color: textMuted),
                   ),
                   InkWell(onTap: widget.onDelete,
                     child: const Icon(Icons.close, size: 12, color: textMuted),
                   ),
                 ],
               ),
-              Expanded(child: _renderBody())
+              Expanded(child: _renderBody()),
             ],
           ),
         ),
       ),
     );
+  }
+
+  RackPos _nearestCell(GuiWidget w, Offset delta) {
+    const cell = 40.0;
+    final target = ((w.col + delta.dx / cell).round()).clamp(0, 7);
+    final targetRow = ((w.row + delta.dy / cell).round()).clamp(0, 9);
+    return RackPos(target, targetRow);
   }
 
   Widget _renderBody() {
@@ -282,7 +409,7 @@ class _RackWidgetState extends ConsumerState<RackWidget> {
       case 'vu_meter':
         return const Center(child: _VuMeterGlyph());
       case 'toggle':
-        return Center(child: Icon(Icons.toggle_on_rounded, size: 30, color: accentGreen));
+        return const Center(child: Icon(Icons.toggle_on_rounded, size: 30, color: accentGreen));
       case 'value_display':
         return const Center(child: _ValueDisplayGlyph());
       case 'waveform_display':
@@ -311,6 +438,103 @@ class _RackWidgetState extends ConsumerState<RackWidget> {
   }
 }
 
+/// Dialogue d'édition widget : label + cible (param exposé ou nœud d'analyse).
+class _EditDialog extends StatefulWidget {
+  final GuiWidget widget;
+  final Map<String, (NodeInstance, ParamDef)> params;
+  final Map<String, String> analysisNodes;
+
+  const _EditDialog({
+    required this.widget,
+    required this.params,
+    required this.analysisNodes,
+  });
+
+  @override
+  State<_EditDialog> createState() => _EditDialogState();
+}
+
+class _EditDialogState extends State<_EditDialog> {
+  late final TextEditingController _label =
+      TextEditingController(text: widget.widget.label);
+  String? _target;
+
+  @override
+  void initState() {
+    super.initState();
+    _target = widget.widget.paramId.isEmpty ? null : widget.widget.paramId;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final w = widget.widget;
+    final isViewer = GuiRegistry.isViewer(w.widgetType);
+    final options = <String, String>{
+      // key = paramId ou nodeId ; value = libellé affiché
+      for (final e in widget.params.entries)
+        e.key : 'param : ${e.value.$2.name} (${e.key})',
+      for (final e in widget.analysisNodes.entries)
+        e.key : 'mesure : ${e.value} (${'${e.key}/'})',
+    };
+    return AlertDialog(
+      backgroundColor: bgPanel,
+      title: Text('Éditer ${w.widgetType}',
+          style: const TextStyle(fontSize: 16)),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
+              controller: _label,
+              decoration: const InputDecoration(labelText: 'Label'),
+            ),
+            const SizedBox(height: 12),
+            if (options.isEmpty)
+              Text(
+                isViewer
+                    ? 'Aucun nœud d\'analyse dans le graphe (ajoutez peak_rms_meter…).'
+                    : 'Aucun paramètre CLAP exposé : double-cliquez d\'abord un nœud\npour en exposer.',
+                style: const TextStyle(fontSize: 11, color: textMuted),
+              )
+            else ...[
+              const Text('Cible',
+                  style: TextStyle(fontSize: 11, color: textMuted)),
+              RadioGroup<String>(
+                groupValue: _target ?? '',
+                onChanged: (v) => setState(() => _target = v),
+                child: Column(
+                  children: [
+                    for (final e in options.entries)
+                      RadioListTile<String>(
+                        value: e.key,
+                        dense: true,
+                        title: Text(e.value,
+                            style: const TextStyle(fontSize: 12)),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: accentOrange),
+          onPressed: () {
+            Navigator.pop(context, _WidgetEdit(_target ?? '', _label.text));
+          },
+          child: const Text('Appliquer'),
+        ),
+      ],
+    );
+  }
+}
+
 /// Pastille de palette (drag-and-drop des widgets GUI).
 class _PaletteChip extends StatelessWidget {
   final String label;
@@ -333,6 +557,8 @@ class _PaletteChip extends StatelessWidget {
     );
   }
 }
+
+// ---------------------------------------------------------------- glyphs --
 
 class _KnobGlyph extends StatelessWidget {
   const _KnobGlyph();

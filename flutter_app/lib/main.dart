@@ -3,6 +3,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/app_status.dart';
 import 'core/app_theme.dart';
 import 'core/project_model.dart';
 import 'features/build/build_panel.dart';
@@ -10,14 +11,7 @@ import 'features/designer/grid_designer.dart';
 import 'features/editor/editor_state.dart';
 import 'features/editor/nodal_editor.dart';
 
-final statusProvider = NotifierProvider<StatusController, String>(StatusController.new);
-
-class StatusController extends Notifier<String> {
-  @override
-  String build() => '> Framework prêt. Registres DSP/GUI et système de Build prêts.';
-
-  void set(String v) => state = '> $v';
-}
+// Le provider de statut du footer est partagé via core/app_status.dart.
 
 void main() {
   runApp(const ProviderScope(child: ClapsStudioApp()));
@@ -43,7 +37,7 @@ class StudioShell extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final project = ref.watch(projectProvider);
-    final status = ref.watch(statusProvider);
+    final status = ref.watch(clapsStatusProvider);
     final validation = ref.watch(validationProvider);
     const horizontalColWidth = 250.0;
 

@@ -9,14 +9,35 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/node_registry.dart';
 import '../../core/project_model.dart';
 
+/// Résultat d'édition d'un nœud transporté hors du dialogue (découplage UI).
+class NodeEditResult {
+  final Map<String, double> params;
+  final List<ParamDef> exposed;
+  const NodeEditResult(this.params, this.exposed);
+}
+
 class ProjectState {
   final GraphSpec spec;
   final int nodeCounter;
+  /// Compteur global d'ids (nœuds + widgets) pour l'unicité après chargement.
+  final int idCounter;
+  /// Chemin du fichier projet courant ('' tant que non enregistré).
+  final String filePath;
 
-  const ProjectState({required this.spec, this.nodeCounter = 3});
+  const ProjectState({
+    required this.spec,
+    this.nodeCounter = 3,
+    this.idCounter = 0,
+    this.filePath = '',
+  });
 
-  ProjectState copy({GraphSpec? spec, int? nodeCounter}) =>
-      ProjectState(spec: spec ?? this.spec, nodeCounter: nodeCounter ?? this.nodeCounter);
+  ProjectState copy({GraphSpec? spec, int? nodeCounter, int? idCounter, String? filePath}) =>
+      ProjectState(
+        spec: spec ?? this.spec,
+        nodeCounter: nodeCounter ?? this.nodeCounter,
+        idCounter: idCounter ?? this.idCounter,
+        filePath: filePath ?? this.filePath,
+      );
 }
 
 class ProjectController extends Notifier<ProjectState> {
@@ -100,6 +121,47 @@ class ProjectController extends Notifier<ProjectState> {
     });
     state = state.copy(spec: s);
   }
+
+  /// Résultat du dialogue Inspector : réglages intrinsèques + params exposés.
+  void applyNodeEdit(String id, NodeEditResult edit) {
+    final nodes = [...state.spec.nodes];
+    final i = nodes.indexWhere((n) => n.id == id);
+    if (i < 0) return;
+    final n = nodes[i];
+    nodes[i] = NodeInstance(
+      id: n.id, nodeType: n.nodeType, pos: n.pos,
+      params: edit.params, exposedParams: edit.exposed,
+    );
+    state = state.copy(spec: state.spec..nodes = nodes);
+  }
+
+  /// Remplace tout le graphe (chargement de projet).
+  void loadSpec(GraphSpec spec, {String filePath = ''}) {
+    int maxNum = 0;
+    for (final m in [
+      ...spec.nodes.map((n) => n.id),
+      ...spec.guiWidgets.map((w) => w.id),
+    ]) {
+      final match = RegExp(r'(\d+)$').firstMatch(m);
+      if (match != null) maxNum = maxNum > int.parse(match.group(1)!) ? maxNum : int.parse(match.group(1)!);
+    }
+    state = ProjectState(
+      spec: spec,
+      nodeCounter: maxNum,
+      idCounter: maxNum,
+      filePath: filePath,
+    );
+  }
+
+  /// Prochain id libre : préfixe + (max connu + 1).
+  String nextId(String prefix) {
+    final n = state.idCounter + 1;
+    return '$prefix$n';
+  }
+
+  void bumpIds() => state = state.copy(idCounter: state.idCounter + 1);
+
+  void setFilePath(String path) => state = state.copy(filePath: path);
 
   void connect(Wire wire) {
     if (state.spec.connections.any((w) => w.same(wire))) return;

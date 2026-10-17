@@ -107,6 +107,10 @@ flutter build windows --debug
 
 ## 7. État au 2026-10-17 (dernière session)
 
+- **UI fonctionnelle** : rack GUI avec pose par drag-curseur (DragTarget opale),
+  Inspector nœud (double-clic, exposition CLAP), édition de widget (label + mapping),
+  enregistrement du projet en JSON (rust/projects/), statut footer partagé.
+  Built/testés : analyze 0 issue, tests 3/3, build windows ✓.
 - **Tout compile** : cargo build/test workspace ✓ (12 tests), flutter analyze ✓ 0 issue
   (11 issues dormantes corrigées : code mort + APIs déconseillées), flutter test 3/3 ✓.
 - **UI vs maquette** : conforme sauf écarts assumés (palette + BuildPanel) et
@@ -131,6 +135,8 @@ flutter build windows --debug
 - emballage bundle VST3.
 - ~~validation REAPER du premier plugin de test~~ lot 17/10 fait côté build : le test
   dans REAPER lui-même reste à faire par l'utilisateur (feedback attendu).
+- **Chargement** d'un projet JSON depuis un picker de fichier (l'enregistrement est
+  fait) + hot-reload du lanceur en mode `flutter run`.
 - « Exporter Code C++ » de la maquette (générateur C++13/17) — non démarré.
 
 ## 9. Rituels de session
