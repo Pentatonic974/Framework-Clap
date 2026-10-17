@@ -1,0 +1,19 @@
+# Builds Rust (artefacts, jamais commités)
+rust/target/
+
+# Artefacts de plugins générés (produits du build-service)
+rust/target/claps/
+
+# Build Flutter
+flutter_app/build/
+flutter_app/.dart_tool/
+flutter_app/.flutter-plugins*
+flutter_app/windows/flutter/ephemeral/
+
+# Config locale Freebuff
+.freebuff/
+
+# Divers OS/éduteurs
+*.log
+.DS_Store
+Thumbs.db

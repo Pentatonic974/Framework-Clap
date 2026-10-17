@@ -1,0 +1,23 @@
+[package]
+name = "clap-runtime"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Export CLAP : clap_entry + extensions, graphe embarqué, buildable en .clap"
+build = "build.rs"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+clap-sys = { workspace = true }
+graph-core = { workspace = true }
+engine = { workspace = true }
+dsp = { workspace = true }
+serde_json = { workspace = true }
+
+[features]
+default = []
+# Active les entry points VST3/AUv2 via clap-wrapper-rs (build C++ requis).
+vst3 = []
+auv2 = []

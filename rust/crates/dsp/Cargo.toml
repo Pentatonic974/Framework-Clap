@@ -1,0 +1,9 @@
+[package]
+name = "dsp"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Bibliothèque de nœuds DSP temps réel (thread-safe, sans allocation au rendu)"
+
+[dependencies]
+graph-core = { workspace = true }

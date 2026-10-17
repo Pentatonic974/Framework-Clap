@@ -1,0 +1,11 @@
+[package]
+name = "engine"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Moteur temps réel : scheduler topologique, paramètres atomiques, file d'événements SPSC"
+
+[dependencies]
+graph-core = { workspace = true }
+dsp = { workspace = true }
+rtrb = { workspace = true }

@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CLAP Plugin Studio Framework - Engine Dynamique</title>
+    <style>
+        :root {
+            --bg-dark: #121316;
+            --bg-panel: #1a1c23;
+            --bg-canvas: #0d0e11;
+            --border-color: #2a2d37;
+            --accent-orange: #ff7043;
+            --accent-blue: #29b6f6;
+            --accent-green: #66bb6a;
+            --accent-purple: #ab47bc;
+            --text-main: #e0e0e0;
+            --text-muted: #8a8d9b;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', system-ui, sans-serif; }
+        body { background-color: var(--bg-dark); color: var(--text-main); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+        /* Top Bar */
+        header {
+            height: 50px; background: var(--bg-panel); border-bottom: 1px solid var(--border-color);
+            display: flex; align-items: center; justify-content: space-between; padding: 0 20px;
+        }
+        .logo { font-weight: 700; font-size: 1.1rem; color: var(--accent-orange); display: flex; align-items: center; gap: 8px; }
+        .build-actions { display: flex; gap: 10px; }
+        .btn {
+            background: #2b2e3a; color: #fff; border: 1px solid var(--border-color); padding: 6px 14px;
+            border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: all 0.2s;
+        }
+        .btn:hover { background: #3a3e4e; }
+        .btn-primary { background: var(--accent-orange); border-color: var(--accent-orange); }
+        .btn-primary:hover { background: #f4511e; }
+        .btn-secondary { background: #26a69a; border-color: #26a69a; }
+
+        /* Main Workspace Layout */
+        .workspace { flex: 1; display: flex; overflow: hidden; }
+
+        /* Sidebar Palette (Catalog) */
+        .sidebar {
+            width: 300px; background: var(--bg-panel); border-right: 1px solid var(--border-color);
+            display: flex; flex-direction: column; padding: 15px; gap: 15px; overflow-y: auto;
+        }
+        .category-group { margin-bottom: 12px; }
+        .category-title { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: var(--accent-blue); letter-spacing: 0.8px; margin-bottom: 6px; padding-bottom: 3px; border-bottom: 1px solid #282c37; }
+        .palette-item {
+            background: #222530; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px 10px;
+            margin-bottom: 5px; cursor: grab; font-size: 0.8rem; display: flex; align-items: center; justify-content: space-between; transition: border-color 0.15s;
+        }
+        .palette-item:hover { border-color: var(--accent-orange); }
+        .tag-badge { font-size: 0.65rem; padding: 2px 5px; border-radius: 3px; background: #121316; color: var(--text-muted); }
+
+        .editor-container { flex: 1; display: flex; background: var(--bg-canvas); }
+
+        /* Canvas Nodal */
+        .nodal-view {
+            flex: 6; border-right: 1px solid var(--border-color); position: relative; overflow: hidden;
+            background-image: radial-gradient(circle, #222530 1px, transparent 1px); background-size: 20px 20px;
+        }
+        .view-header {
+            position: absolute; top: 10px; left: 10px; background: rgba(26,28,35,0.85);
+            padding: 6px 12px; border-radius: 4px; font-size: 0.8rem; color: var(--text-muted); border: 1px solid var(--border-color); z-index: 10;
+        }
+
+        /* Nœud Dynamique */
+        .node {
+            position: absolute; width: 180px; background: var(--bg-panel); border: 1px solid var(--border-color);
+            border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); font-size: 0.8rem; z-index: 2;
+        }
+        .node-header { background: #252834; padding: 6px 10px; font-weight: 600; border-bottom: 1px solid var(--border-color); border-radius: 5px 5px 0 0; display: flex; justify-content: space-between; }
+        .node-body { padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+        .port-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.72rem; color: var(--text-muted); }
+        .port { width: 10px; height: 10px; background: var(--accent-blue); border-radius: 50%; display: inline-block; cursor: crosshair; }
+        .port-out { background: var(--accent-orange); }
+
+        /* Canvas UI Rack */
+        .gui-grid-view {
+            flex: 4; position: relative; background: #15161b;
+            background-image: linear-gradient(var(--border-color) 1px, transparent 1px), linear-gradient(90deg, var(--border-color) 1px, transparent 1px);
+            background-size: 20px 20px; padding: 20px; display: flex; justify-content: center; align-items: center;
+        }
+        .plugin-rack {
+            width: 320px; height: 420px; background: #20222c; border: 2px solid #343848;
+            border-radius: 8px; padding: 15px; position: relative; box-shadow: 0 8px 24px rgba(0,0,0,0.6); display: flex; flex-wrap: wrap; align-content: flex-start; gap: 10px;
+        }
+        .plugin-title { width: 100%; font-size: 0.9rem; font-weight: 700; color: var(--accent-orange); text-align: center; margin-bottom: 10px; }
+
+        /* Composants GUI */
+        .gui-widget {
+            border: 1px dashed var(--accent-blue); border-radius: 6px; padding: 8px;
+            display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; background: rgba(41, 182, 246, 0.05);
+        }
+        .widget-knob { width: 75px; height: 85px; }
+        .knob-circle { width: 36px; height: 36px; border-radius: 50%; border: 3px solid var(--text-main); border-top-color: var(--accent-orange); }
+        .widget-slider { width: 100%; height: 50px; }
+        .slider-bar { width: 85%; height: 6px; background: #3a3e4e; border-radius: 3px; position: relative; }
+        .slider-thumb { width: 12px; height: 16px; background: var(--accent-orange); border-radius: 2px; position: absolute; left: 50%; top: -5px; }
+
+        footer {
+            height: 35px; background: #0a0b0d; border-top: 1px solid var(--border-color);
+            display: flex; align-items: center; padding: 0 15px; font-family: monospace; font-size: 0.75rem; color: var(--accent-green);
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo">🎛️ CLAP Studio Framework</div>
+        <div class="build-actions">
+            <button class="btn btn-primary" onclick="buildPlugin()">⚙️ Build Plugin (.clap)</button>
+            <button class="btn btn-secondary" onclick="exportCppCode()">💻 Exporter Code C++</button>
+            <button class="btn" onclick="exportGraphJSON()">💾 Sauvegarder Projet (JSON)</button>
+        </div>
+    </header>
+
+    <div class="workspace">
+        <div class="sidebar" id="sidebar-palette">
+            <!-- La palette dynamique par catégories sera injectée ici par JS -->
+        </div>
+
+        <div class="editor-container">
+            <div class="nodal-view" id="nodal-canvas">
+                <div class="view-header">Graphe Nodal (DSP & Control Flow)</div>
+                <!-- Les nœuds instanciés du projet seront générés par JS -->
+            </div>
+
+            <div class="gui-grid-view">
+                <div class="view-header">Interface Plugin (GUI Designer Grid)</div>
+                <div class="plugin-rack" id="gui-rack-canvas">
+                    <div class="plugin-title" id="plugin-rack-title">MY_CLAP_PLUGIN.CLAP</div>
+                    <!-- Les widgets GUI instanciés seront générés par JS -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <span id="log-status">> Framework prêt. Registres DSP/GUI et système de Build prêts.</span>
+    </footer>
+
+    <script>
+        /**
+         * =========================================================================
+         * INSTRUCTION POUR L'AGENT DE DÉVELOPPEMENT (AI AGENT DIRECTIVES)
+         * =========================================================================
+         * 1. NE PAS CODER EN DUR DE NŒUDS OU COMPOSANTS DANS LE HTML.
+         * 2. NODE_REGISTRY contient l'intégralité des briques DSP, E/S et CLAP API.
+         * 3. GUI_REGISTRY contient l'intégralité des briques d'interface graphique.
+         * 4. La fonction `buildPlugin()` sérialise `pluginGraphState` et déclenche
+         *    la génération C++/Rust + compilation du binaire .clap final dans le
+         *    répertoire cible ad hoc de l'utilisateur (~/.clap/ ou Common Files/CLAP).
+         * =========================================================================
+         */
+
+        // 1. REGISTRE EXHAUSTIF DES NŒUDS (DSP, CONTROL, CLAP API EXTENSIONS)
+        const NODE_REGISTRY = [
+            // --- E/S & CLAP EXTENSIONS ---
+            { type: "clap_audio_in", name: "Audio Input Port", category: "E/S & CLAP API", inputs: [], outputs: ["Out L", "Out R"] },
+            { type: "clap_audio_out", name: "Audio Output Port", category: "E/S & CLAP API", inputs: ["In L", "In R"], outputs: [] },
+            { type: "clap_note_in", name: "Note Input (MIDI/MPE)", category: "E/S & CLAP API", inputs: [], outputs: ["Note", "Gate", "Velocity", "Expression"] },
+            { type: "clap_note_out", name: "Note Output Port", category: "E/S & CLAP API", inputs: ["Note", "Gate", "Velocity"], outputs: [] },
+            { type: "clap_param", name: "CLAP Parameter", category: "E/S & CLAP API", inputs: ["Mod Offset"], outputs: ["Value Out"], paramId: "param_default" },
+            { type: "clap_voice_alloc", name: "Voice Allocator (Poly)", category: "E/S & CLAP API", inputs: ["Note In"], outputs: ["Voice 1..N"] },
+            { type: "clap_transport", name: "Transport Info (BPM)", category: "E/S & CLAP API", inputs: [], outputs: ["BPM", "IsPlaying", "TimeSig"] },
+            { type: "clap_track_info", name: "Track Info Ext", category: "E/S & CLAP API", inputs: [], outputs: ["Track Name", "Color"] },
+            { type: "clap_latency_tail", name: "Latency & Tail Reporter", category: "E/S & CLAP API", inputs: ["Latency ms", "Tail ms"], outputs: [] },
+
+            // --- SOURCES & GENERATEURS DSP ---
+            { type: "osc_va", name: "Oscillateur VA (Analog)", category: "DSP - Sources", inputs: ["Pitch", "PWM", "Sync"], outputs: ["Audio Out"] },
+            { type: "osc_wavetable", name: "Oscillateur Wavetable", category: "DSP - Sources", inputs: ["Pitch", "WT Position"], outputs: ["Audio Out"] },
+            { type: "noise_gen", name: "Générateur de Bruit", category: "DSP - Sources", inputs: ["Color"], outputs: ["Audio Out"] },
+            { type: "sample_player", name: "Lecteur d'Échantillons", category: "DSP - Sources", inputs: ["Trigger", "Pitch"], outputs: ["Out L", "Out R"] },
+            { type: "additive_engine", name: "Moteur Additif", category: "DSP - Sources", inputs: ["Pitch", "Harmonics"], outputs: ["Audio Out"] },
+
+            // --- FILTRES & EQ ---
+            { type: "filter_svf", name: "Filtre SVF (LP/HP/BP)", category: "DSP - Filtres & EQ", inputs: ["Audio In", "Cutoff", "Reso"], outputs: ["LP Out", "HP Out", "BP Out"] },
+            { type: "filter_ladder", name: "Filtre Ladder (24dB)", category: "DSP - Filtres & EQ", inputs: ["Audio In", "Cutoff", "Reso", "Drive"], outputs: ["Audio Out"] },
+            { type: "eq_parametric", name: "Égaliseur Paramétrique", category: "DSP - Filtres & EQ", inputs: ["Audio In", "Freq", "Q", "Gain"], outputs: ["Audio Out"] },
+            { type: "filter_comb", name: "Filtre Peigne (Comb)", category: "DSP - Filtres & EQ", inputs: ["Audio In", "Time", "Feedback"], outputs: ["Audio Out"] },
+            { type: "filter_formant", name: "Filtre Formant Vocal", category: "DSP - Filtres & EQ", inputs: ["Audio In", "Vowel"], outputs: ["Audio Out"] },
+
+            // --- DYNAMIQUE & AMPLITUDE ---
+            { type: "gain_node", name: "Gain / Atténuateur", category: "DSP - Dynamique", inputs: ["Audio In", "Gain dB"], outputs: ["Audio Out"] },
+            { type: "compressor", name: "Compresseur Stéréo", category: "DSP - Dynamique", inputs: ["In L", "In R", "Threshold", "Ratio", "Attack", "Release", "Sidechain"], outputs: ["Out L", "Out R"] },
+            { type: "limiter", name: "Limiteur de Crête", category: "DSP - Dynamique", inputs: ["Audio In", "Ceiling"], outputs: ["Audio Out"] },
+            { type: "noise_gate", name: "Expander / Noise Gate", category: "DSP - Dynamique", inputs: ["Audio In", "Threshold"], outputs: ["Audio Out"] },
+            { type: "transient_shaper", name: "Transient Shaper", category: "DSP - Dynamique", inputs: ["Audio In", "Attack", "Sustain"], outputs: ["Audio Out"] },
+
+            // --- EFFETS TEMPORELS & MODULATION ---
+            { type: "delay_stereo", name: "Délai Stéréo / Tape", category: "DSP - Effets", inputs: ["In L", "In R", "Time L", "Time R", "Feedback"], outputs: ["Out L", "Out R"] },
+            { type: "reverb_algo", name: "Réverb Algorithmique", category: "DSP - Effets", inputs: ["In L", "In R", "Decay", "Damp", "Size"], outputs: ["Out L", "Out R"] },
+            { type: "reverb_convolution", name: "Réverb Convolution", category: "DSP - Effets", inputs: ["In L", "In R", "IR Select"], outputs: ["Out L", "Out R"] },
+            { type: "chorus_flanger", name: "Chorus / Flanger / Phaser", category: "DSP - Effets", inputs: ["Audio In", "Rate", "Depth", "Feedback"], outputs: ["Out L", "Out R"] },
+            { type: "pitch_shifter", name: "Pitch Shifter", category: "DSP - Effets", inputs: ["Audio In", "Semitones"], outputs: ["Audio Out"] },
+
+            // --- SATURATION & DISTORSION ---
+            { type: "saturation_tape", name: "Saturation Tube / Tape", category: "DSP - Saturation", inputs: ["Audio In", "Drive", "Warmth"], outputs: ["Audio Out"] },
+            { type: "waveshaper", name: "Waveshaper Courbe", category: "DSP - Saturation", inputs: ["Audio In", "Drive", "Curve"], outputs: ["Audio Out"] },
+            { type: "bitcrusher", name: "Bitcrusher / Downsampler", category: "DSP - Saturation", inputs: ["Audio In", "Bits", "Downsample"], outputs: ["Audio Out"] },
+
+            // --- ANALYSE & MESURE ---
+            { type: "fft_analyzer", name: "Analyseur Spectre FFT", category: "DSP - Analyse", inputs: ["Audio In"], outputs: ["FFT Data"] },
+            { type: "peak_rms_meter", name: "Mesureur Crête / RMS", category: "DSP - Analyse", inputs: ["Audio In"], outputs: ["Peak", "RMS"] },
+            { type: "lufs_meter", name: "Mesureur Sonie LUFS", category: "DSP - Analyse", inputs: ["In L", "In R"], outputs: ["LUFS Int", "LUFS Short"] },
+            { type: "oscilloscope", name: "Oscilloscope Waveform", category: "DSP - Analyse", inputs: ["Audio In"], outputs: ["Scope Data"] },
+            { type: "goniometer", name: "Goniomètre / Corrélation", category: "DSP - Analyse", inputs: ["In L", "In R"], outputs: ["Phase Data"] },
+
+            // --- MODULATION & CONTRÔLE ---
+            { type: "env_adsr", name: "Enveloppe ADSR", category: "Modulation", inputs: ["Gate", "Attack", "Decay", "Sustain", "Release"], outputs: ["Env Out"] },
+            { type: "env_mseg", name: "Enveloppe MSEG Multi-pts", category: "Modulation", inputs: ["Trigger", "Rate"], outputs: ["Curve Out"] },
+            { type: "lfo_mod", name: "LFO Multi-formes", category: "Modulation", inputs: ["Rate", "Sync", "Shape"], outputs: ["LFO Out"] },
+            { type: "sample_hold", name: "Sample & Hold / Random", category: "Modulation", inputs: ["Clock"], outputs: ["Random Out"] },
+            { type: "env_follower", name: "Suiveur d'Enveloppe", category: "Modulation", inputs: ["Audio In", "Attack", "Release"], outputs: ["Env Out"] },
+
+            // --- MATH, LOGIQUE & LISSAGE ---
+            { type: "math_op", name: "Opérateur Math (Add/Mul)", category: "Math & Logique", inputs: ["A", "B"], outputs: ["Result"] },
+            { type: "scale_offset", name: "Scale & Offset", category: "Math & Logique", inputs: ["In", "Scale", "Offset"], outputs: ["Out"] },
+            { type: "clamp_value", name: "Clamp [Min, Max]", category: "Math & Logique", inputs: ["In", "Min", "Max"], outputs: ["Out"] },
+            { type: "logic_op", name: "Logique (AND/OR/NOT)", category: "Math & Logique", inputs: ["In A", "In B"], outputs: ["Bool Out"] },
+            { type: "math_expr", name: "Formule Math Custom", category: "Math & Logique", inputs: ["X", "Y", "Z"], outputs: ["Result"] },
+            { type: "smooth_slew", name: "Lisseur Anti-Zipper", category: "Math & Logique", inputs: ["In", "Time ms"], outputs: ["Out"] },
+            { type: "quantizer", name: "Quantificateur de Gamme", category: "Math & Logique", inputs: ["Pitch In", "Scale Select"], outputs: ["Pitch Out"] }
+        ];
+
+        // 2. REGISTRE EXHAUSTIF DES COMPOSANTS GUI (DESIGNER GRID)
+        const GUI_REGISTRY = [
+            // --- CONTROLES D'ENTREE ---
+            { type: "knob", name: "Potentiomètre (Knob)", category: "Contrôles GUI", width: "widget-knob", mappedParam: "gain_db" },
+            { type: "slider", name: "Fader Linéaire", category: "Contrôles GUI", width: "widget-slider", mappedParam: "cutoff_hz" },
+            { type: "toggle", name: "Bouton Switch On/Off", category: "Contrôles GUI", width: "widget-slider", mappedParam: "bypass_state" },
+            { type: "dropdown", name: "Menu Déroulant", category: "Contrôles GUI", width: "widget-slider", mappedParam: "waveform_type" },
+            { type: "xy_pad", name: "XY Pad 2D Vector", category: "Contrôles GUI", width: "widget-slider", mappedParam: "xy_param" },
+            { type: "piano_keyboard", name: "Clavier Virtuel Piano", category: "Contrôles GUI", width: "widget-slider", mappedParam: "virtual_midi" },
+            { type: "curve_editor", name: "Canvas Courbe / MSEG", category: "Contrôles GUI", width: "widget-slider", mappedParam: "mseg_data" },
+
+            // --- VISUALISEURS ---
+            { type: "vu_meter", name: "Vumètre LED Bar / RMS", category: "Visualiseurs GUI", width: "widget-slider", mappedParam: "meter_out" },
+            { type: "value_display", name: "Afficheur Numérique", category: "Visualiseurs GUI", width: "widget-slider", mappedParam: "display_val" },
+            { type: "waveform_display", name: "Visu Forme d'Onde / Spectre", category: "Visualiseurs GUI", width: "widget-slider", mappedParam: "scope_data" },
+
+            // --- STRUCTURE & LAYOUT ---
+            { type: "panel_group", name: "Cadre Groupe / Section", category: "Structure GUI", width: "widget-slider", mappedParam: "none" },
+            { type: "tab_container", name: "Conteneur Onglets (Tabs)", category: "Structure GUI", width: "widget-slider", mappedParam: "none" },
+            { type: "text_logo", name: "Texte / Logo Branding", category: "Structure GUI", width: "widget-slider", mappedParam: "none" }
+        ];
+
+        // 3. ETAT COURANT DU PROJET DU DÉVELOPPEUR (Sérialisable)
+        let pluginGraphState = {
+            meta: { name: "CustomCLAPEffect", id: "com.developer.customclap", version: "1.0.0" },
+            nodes: [
+                { instanceId: "node_1", type: "clap_audio_in", x: 30, y: 80 },
+                { instanceId: "node_2", type: "clap_param", x: 190, y: 190 },
+                { instanceId: "node_3", type: "clap_audio_out", x: 360, y: 80 }
+            ],
+            connections: [
+                { fromNode: "node_1", fromPort: 0, toNode: "node_3", toPort: 0 }
+            ],
+            guiWidgets: [
+                { widgetId: "gui_1", type: "knob", label: "Gain (dB)", paramId: "gain_db" }
+            ]
+        };
+
+        // Rendu de la palette latérale structurée par catégories
+        function renderSidebarPalette() {
+            const sidebar = document.getElementById('sidebar-palette');
+            
+            // Regroupement par catégories des nœuds
+            const nodeCategories = [...new Set(NODE_REGISTRY.map(item => item.category))];
+            let html = `<div style="font-size:0.75rem; font-weight:700; color:var(--text-muted); margin-bottom:5px;">BIBLIOTHÈQUE NODALE</div>`;
+
+            nodeCategories.forEach(cat => {
+                const items = NODE_REGISTRY.filter(n => n.category === cat);
+                html += `
+                    <div class="category-group">
+                        <div class="category-title">${cat}</div>
+                        ${items.map(item => `
+                            <div class="palette-item" draggable="true" ondragstart="handleDragStart(event, 'node', '\${item.type}')">
+                                <span>\${item.name}</span>
+                                <span class="tag-badge">Nœud</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            });
+
+            // Regroupement des composants GUI
+            const guiCategories = [...new Set(GUI_REGISTRY.map(item => item.category))];
+            html += `<div style="font-size:0.75rem; font-weight:700; color:var(--text-muted); margin-top:15px; margin-bottom:5px;">COMPOSANTS GRAPHIQUES (GUI)</div>`;
+
+            guiCategories.forEach(cat => {
+                const items = GUI_REGISTRY.filter(g => g.category === cat);
+                html += `
+                    <div class="category-group">
+                        <div class="category-title" style="color:var(--accent-purple);">${cat}</div>
+                        ${items.map(item => `
+                            <div class="palette-item" draggable="true" ondragstart="handleDragStart(event, 'gui', '\${item.type}')">
+                                <span>\${item.name}</span>
+                                <span class="tag-badge" style="color:var(--accent-purple);">GUI</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            });
+
+            sidebar.innerHTML = html;
+        }
+
+        // Rendu dynamique de l'éditeur nodal
+        function renderNodalCanvas() {
+            const canvas = document.getElementById('nodal-canvas');
+            const headerHTML = `<div class="view-header">Graphe Nodal (DSP & Control Flow)</div>`;
+            
+            const nodesHTML = pluginGraphState.nodes.map(nodeInstance => {
+                const def = NODE_REGISTRY.find(r => r.type === nodeInstance.type) || { name: nodeInstance.type, inputs: [], outputs: [] };
+                return `
+                    <div class="node" style="top: ${nodeInstance.y}px; left: ${nodeInstance.x}px;" id="${nodeInstance.instanceId}">
+                        <div class="node-header">
+                            <span>${def.name}</span>
+                            <small style="color:var(--accent-orange);">${nodeInstance.instanceId}</small>
+                        </div>
+                        <div class="node-body">
+                            ${def.inputs.map(inPort => `<div class="port-row"><span class="port"></span><span>\${inPort}</span></div>`).join('')}
+                            ${def.outputs.map(outPort => `<div class="port-row"><span>\${outPort}</span><span class="port port-out"></span></div>`).join('')}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            canvas.innerHTML = headerHTML + nodesHTML;
+        }
+
+        // Rendu dynamique de la grille GUI
+        function renderGUIRack() {
+            const rack = document.getElementById('gui-rack-canvas');
+            const titleHTML = `<div class="plugin-title">${pluginGraphState.meta.name}.CLAP</div>`;
+
+            const widgetsHTML = pluginGraphState.guiWidgets.map(widgetInstance => {
+                if (widgetInstance.type === 'knob') {
+                    return `
+                        <div class="gui-widget widget-knob">
+                            <div class="knob-circle"></div>
+                            <span style="font-size: 0.7rem;">${widgetInstance.label}</span>
+                        </div>
+                    `;
+                } else if (widgetInstance.type === 'slider') {
+                    return `
+                        <div class="gui-widget widget-slider">
+                            <span style="font-size: 0.7rem;">${widgetInstance.label}</span>
+                            <div class="slider-bar"><div class="slider-thumb"></div></div>
+                        </div>
+                    `;
+                }
+                return '';
+            }).join('');
+
+            rack.innerHTML = titleHTML + widgetsHTML;
+        }
+
+        // Fonctions d'Action Principales
+        function buildPlugin() {
+            const log = document.getElementById('log-status');
+            log.innerText = `> [BUILD] Sérialisation du graphe '${pluginGraphState.meta.name}'...`;
+            
+            setTimeout(() => {
+                log.innerText = `> [BUILD] Génération du code C++ (extensions CLAP_EXT_PARAMS & CLAP_EXT_AUDIO_PORTS)...`;
+            }, 600);
+
+            setTimeout(() => {
+                log.innerText = `> [BUILD] Compilation en cours via Clang/GCC... Déploiement dans le répertoire ad hoc.`;
+            }, 1200);
+
+            setTimeout(() => {
+                log.innerText = `> [SUCCESS] Plugin binaire généré et déposé : ~/.clap/${pluginGraphState.meta.name.toLowerCase()}.clap`;
+                alert(`Succès ! Le plugin ${pluginGraphState.meta.name}.clap a été compilé et installé dans votre répertoire de plugins CLAP.`);
+            }, 2000);
+        }
+
+        function exportCppCode() {
+            alert("Génération du code source C++17 complet avec l'API C-only de CLAP.");
+        }
+
+        function exportGraphJSON() {
+            console.log("State JSON du plugin :", JSON.stringify(pluginGraphState, null, 2));
+            alert("Structure JSON du projet exportée dans la console.");
+        }
+
+        function handleDragStart(event, category, itemType) {
+            event.dataTransfer.setData('text/plain', JSON.stringify({ category, itemType }));
+        }
+
+        // Initialisation
+        window.addEventListener('DOMContentLoaded', () => {
+            renderSidebarPalette();
+            renderNodalCanvas();
+            renderGUIRack();
+        });
+    </script>
+</body>
+</html>
