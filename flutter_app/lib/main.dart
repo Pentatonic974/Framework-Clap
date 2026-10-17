@@ -106,12 +106,7 @@ class StudioShell extends ConsumerWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [const NodalEditor()],
-                ),
-              ),
+              const Expanded(child: NodalEditor()),
               VerticalDivider(width: 1, color: borderColor),
               SizedBox(
                 width: horizontalColWidth + 60,

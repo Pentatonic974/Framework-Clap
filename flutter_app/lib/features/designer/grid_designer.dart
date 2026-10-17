@@ -613,17 +613,21 @@ class _VuMeterGlyph extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        for (final (i, lit) in [true, true, true, true, true, false, false, false].indexed)
-          Container(
-            width: 3,
-            height: 4 + i * 0.8,
-            margin: const EdgeInsets.symmetric(horizontal: 1),
-            color: lit ? accentGreen : const Color(0xFF3A3E4E),
-          ),
-      ],
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          for (final (i, lit) in [true, true, true, true, true, false, false, false].indexed)
+            Container(
+              width: 3,
+              height: 4 + i * 0.8,
+              margin: const EdgeInsets.symmetric(horizontal: 1),
+              color: lit ? accentGreen : const Color(0xFF3A3E4E),
+            ),
+        ],
+      ),
     );
   }
 }
