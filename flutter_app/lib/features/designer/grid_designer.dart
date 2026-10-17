@@ -4,6 +4,7 @@
 /// nœud d'analyse, les contrôles un paramètre "nodeId/paramId".
 library;
 
+import 'package:flutter/gestures.dart' show kPrimaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -328,25 +329,28 @@ class RackWidget extends ConsumerStatefulWidget {
 class _RackWidgetState extends ConsumerState<RackWidget> {
   RackPos? dragOriginCell;
   Offset? pointerOrigin;
+  bool dragging = false;
 
   @override
   Widget build(BuildContext context) {
     final w = widget.widget;
-    return GestureDetector(
-      onDoubleTap: widget.onEdited,
-      // Déplacement absolu par le pointeur : cellule finale = cellule de
-      // départ + (curseur − curseur départ), fidèle à la souris.
-      onPanStart: (details) {
+    return Listener(
+      onPointerDown: (e) {
         dragOriginCell = RackPos(w.col, w.row);
-        pointerOrigin = details.globalPosition;
+        pointerOrigin = e.position;
+        dragging = e.buttons == kPrimaryMouseButton;
       },
-      onPanUpdate: (details) {
-        if (dragOriginCell == null || pointerOrigin == null) return;
-        final d = details.globalPosition - pointerOrigin!;
+      onPointerMove: (e) {
+        if (!dragging || dragOriginCell == null || pointerOrigin == null) return;
+        final d = e.position - pointerOrigin!;
         final target = (dragOriginCell!.col + (d.dx / 40.0).round()).clamp(0, 7);
         final targetRow = (dragOriginCell!.row + (d.dy / 40.0).round()).clamp(0, 9);
         widget.onMoved(target, targetRow);
       },
+      onPointerUp: (e) => dragging = false,
+      onPointerCancel: (e) => dragging = false,
+      child: GestureDetector(
+      onDoubleTap: widget.onEdited,
       child: MouseRegion(
         cursor: SystemMouseCursors.grab,
         child: Container(
@@ -402,6 +406,7 @@ class _RackWidgetState extends ConsumerState<RackWidget> {
             ],
           ),
         ),
+      ),
       ),
     );
   }
