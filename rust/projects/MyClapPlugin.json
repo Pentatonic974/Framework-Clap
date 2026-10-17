@@ -1,0 +1,87 @@
+{
+  "meta": {
+    "name": "MyClapPlugin",
+    "id": "com.example.myclapplugin",
+    "version": "1.0.0",
+    "vendor": "",
+    "url": "",
+    "feature": "audio-effect"
+  },
+  "nodes": [
+    {
+      "id": "in1",
+      "nodeType": "clap_audio_in",
+      "x": 60.0,
+      "y": 140.0,
+      "params": {},
+      "exposedParams": []
+    },
+    {
+      "id": "g1",
+      "nodeType": "gain_node",
+      "x": 240.0,
+      "y": 140.0,
+      "params": {},
+      "exposedParams": [
+        {
+          "paramId": "gain_db",
+          "name": "Gain (dB)",
+          "default": 0.0,
+          "min": -60.0,
+          "max": 24.0,
+          "step": 0.1
+        }
+      ]
+    },
+    {
+      "id": "out1",
+      "nodeType": "clap_audio_out",
+      "x": 460.0,
+      "y": 140.0,
+      "params": {},
+      "exposedParams": []
+    }
+  ],
+  "connections": [
+    {
+      "fromNode": "in1",
+      "fromPort": 0,
+      "toNode": "g1",
+      "toPort": 0
+    },
+    {
+      "fromNode": "g1",
+      "fromPort": 0,
+      "toNode": "out1",
+      "toPort": 0
+    },
+    {
+      "fromNode": "in1",
+      "fromPort": 1,
+      "toNode": "out1",
+      "toPort": 1
+    }
+  ],
+  "guiWidgets": [
+    {
+      "id": "w1",
+      "widgetType": "knob",
+      "label": "Gain (dB)",
+      "paramId": "g1/gain_db",
+      "col": 0,
+      "row": 0,
+      "colSpan": 2,
+      "rowSpan": 2
+    },
+    {
+      "id": "w2",
+      "widgetType": "vu_meter",
+      "label": "Out Level",
+      "paramId": "g1",
+      "col": 2,
+      "row": 0,
+      "colSpan": 1,
+      "rowSpan": 2
+    }
+  ]
+}
