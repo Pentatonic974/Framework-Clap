@@ -32,6 +32,8 @@ class NodalEditor extends ConsumerStatefulWidget {
 
 class _NodalEditorState extends ConsumerState<NodalEditor> {
   PendingWire? pendingOutput;
+  /// Clé de la surface de dépôt (le Stack du canvas) : coordonnées exactes.
+  final GlobalKey _canvasKey = GlobalKey();
 
   NodeDef? _def(String? type) => type == null ? null : ClapNodeRegistry.byType(type);
 
@@ -86,19 +88,21 @@ class _NodalEditorState extends ConsumerState<NodalEditor> {
             onWillAcceptWithDetails: (_) => true,
             onAcceptWithDetails: (details) {
               final nodeType = details.data.$1;
-              // Position de dépôt = curseur, en coordonnées du canvas.
-              final box = context.findRenderObject() as RenderBox?;
+              // Position de dépôt = curseur, en coordonnées du Stack du
+              // canvas (clé dédiée : le contexte du builder peut différer).
+              final box = _canvasKey.currentContext?.findRenderObject() as RenderBox?;
               if (box == null) return;
               final local = box.globalToLocal(details.offset);
               ref
                   .read(projectProvider.notifier)
                   .addNode(nodeType, NodePos(
-                      local.dx.clamp(0, box.size.width - 220),
-                      local.dy.clamp(0, box.size.height - 120)));
+                      local.dx.clamp(0, (box.size.width - 220).clamp(0, double.infinity)),
+                      local.dy.clamp(0, (box.size.height - 120).clamp(0, double.infinity))));
             },
             builder: (context, candidates, _) {
               final highlight = candidates.isNotEmpty;
               return Container(
+                key: _canvasKey,
                 color: highlight
                     ? Color.lerp(bgCanvas, accentOrange, 0.06)
                     : bgCanvas,

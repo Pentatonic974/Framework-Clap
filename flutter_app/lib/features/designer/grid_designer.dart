@@ -82,6 +82,8 @@ class _GridDesignerState extends ConsumerState<GridDesigner> {
       child: DragTarget<(String, Offset)>(
         onWillAcceptWithDetails: (_) => true,
         onAcceptWithDetails: (details) {
+          // Le contexte ici EST le DragTarget (iframe rack exact) : le
+          // décalage vient du builder externe — clés inutiles dans ce scope.
           final box = context.findRenderObject() as RenderBox?;
           if (box == null) return;
           final local = box.globalToLocal(details.offset);
