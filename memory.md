@@ -109,6 +109,11 @@ flutter build windows --debug    # ✓ claps_studio.exe
 - **Premier plugin de test REAPER** : `ClapsTestNoise` (bruit → gain, knob [rust/test-plugin.json])
   construit et **installé** dans `%LOCALAPPDATA%\Programs\Common\CLAP\ClapsTestNoise.clap`.
   Test utilisateur REAPER attendu (feedback = prochaine étape).
+- **Git/GitHub** : repo `https://github.com/Pentatonic974/Framework-Clap.git`
+  (créé le 17/10 via API avec le jeton du credential manager), branche de travail
+  **`devel`** (init `-b devel`, upstream tracké). Identité git locale :
+  Pentatonic974 / Pentatonic974@users.noreply.github.com. `.gitignore` exclut
+  rust/target, flutter build, .freebuff.
 
 ## 8. Ouvert (backlog)
 
