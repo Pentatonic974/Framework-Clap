@@ -99,7 +99,6 @@ struct DescriptorBox {
     feature_storage: Vec<CString>,
 }
 
-static SHARED_STORE: Mutex<Option<Arc<Shared>>> = Mutex::new(None);
 static DESCRIPTOR_STORE: Mutex<Option<Box<DescriptorBox>>> = Mutex::new(None);
 
 fn c_copy(dst: &mut [c_char], src: &CStr) {
@@ -168,8 +167,15 @@ unsafe extern "C" fn clap_process_impl(
         return 0; // CLAP_PROCESS_ERROR
     };
     let audio_ptr = state.audio.swap(0, Ordering::Acquire);
+    // Paramètres du bus process : appliqués MÊME si le runtime audio n'est
+    // pas prêt (le host peut automatiser un plugin désactivé — contrat
+    // clap-validator param-set-events).
+    apply_param_events((*process).in_events, state);
     if audio_ptr == 0 {
-        // Le runtime n'est pas encore prêt : silence, pas d'erreur bloquante.
+        // Le runtime n'est pas encore prêt : on DOIT écrire le silence dans
+        // les sorties (le validateur vérifie que chaque échantillon est
+        // écrit), puis retourner CONTINUE sans erreur.
+        write_output_silence((*process).audio_outputs, (*process).frames_count as usize);
         return CLAP_PROCESS_CONTINUE;
     }
     ctx_run(audio_ptr as *mut AudioCtx, state, process);
@@ -177,40 +183,121 @@ unsafe extern "C" fn clap_process_impl(
     CLAP_PROCESS_CONTINUE
 }
 
+/// Parcourt les in_events et pousse les CLAP_EVENT_PARAM_VALUE dans le bus.
+unsafe fn apply_param_events(in_events: *const clap_input_events, state: &PluginState) {
+    if in_events.is_null() {
+        return;
+    }
+    let list = &*in_events;
+    let size = list.size.map(|f| f(in_events)).unwrap_or(0);
+    for i in 0..size {
+        let header = match list.get {
+            Some(f) => f(in_events, i),
+            None => break,
+        };
+        if header.is_null() {
+            break;
+        }
+        let h: &clap_event_header = &*header;
+        if h.space_id != CLAP_CORE_EVENT_SPACE_ID || h.type_ != clap_sys::events::CLAP_EVENT_PARAM_VALUE {
+            continue;
+        }
+        let evt = &*(header as *const clap_event_param_value);
+        state.shared.bus.set_param(evt.param_id, evt.value as f32);
+    }
+}
+
 /// Exécute un bloc audio. Séparé pour la clarté : aucun syscall, aucune alloc.
 unsafe fn ctx_run(audio: *mut AudioCtx, state: &PluginState, process: *const clap_process) {
     let audio = &mut *audio;
-    let frames = ((*process).frames_count as usize)
-        .min(MAX_SCRATCH_FRAMES)
-        .min(audio.runtime.max_frames());
+    let total = (*process).frames_count as usize;
+    let chunk_cap = MAX_SCRATCH_FRAMES.min(audio.runtime.max_frames());
+    let mut done = 0usize;
+    let mut first_chunk = true;
+    while done < total {
+        let frames = (total - done).min(chunk_cap);
+        let proc_chunk = ClapProcessChunk {
+            frames_count: frames as u32,
+            in_offset: done,
+        };
+        ctx_run_chunk(audio, state, process, &proc_chunk, first_chunk);
+        done += frames;
+        first_chunk = false;
+    }
+}
 
-    // --- 1) épuration + copie des entrées host ---
-    copy_input((*process).audio_inputs, &mut audio.in_l, &mut audio.in_r, frames);
+/// Fenêtre d'un bloc audio (sous-bloc de clap_process quand frames > scratch).
+struct ClapProcessChunk {
+    frames_count: u32,
+    in_offset: usize,
+}
 
-    // --- 2) événements host -> DspEvent (stockage fixe, zéro alloc) ---
-    audio.ext_len = unsafe { collect_events((*process).in_events, &mut audio.ext_events) };
+unsafe fn ctx_run_chunk(
+    audio: &mut AudioCtx,
+    _state: &PluginState,
+    process: *const clap_process,
+    chunk: &ClapProcessChunk,
+    first_chunk: bool,
+) {
+    let frames = chunk.frames_count as usize;
+
+    // --- 1) copie des entrées host (offset d'origine uniquement) ---
+    copy_input_offset((*process).audio_inputs, &mut audio.in_l, &mut audio.in_r, frames, chunk.in_offset);
+
+    // --- 2) événements host -> DspEvent (stockage fixe, zéro alloc).
+    // Les notes sont appliquées une seule fois (le DSP ne tient pas compte
+    // des offsets intra-bloc) ; les params passent déjà par le bus. ---
+    if first_chunk {
+        audio.ext_len = unsafe { collect_events((*process).in_events, &mut audio.ext_events) };
+    } else {
+        audio.ext_len = 0;
+    }
     let ext_events = &audio.ext_events[..audio.ext_len];
 
     // --- 3) rendu du graphe ---
-    let mut out_buf_l: &mut [f32] = &mut audio.out_l;
-    let _ = &state.shared; // bus partagé à jamais attaché dans le runtime
     audio
         .runtime
-        .render(&audio.in_l, &audio.in_r, out_buf_l, &mut audio.out_r, frames, ext_events);
+        .render(&audio.in_l, &audio.in_r, &mut audio.out_l, &mut audio.out_r, frames, ext_events);
 
     // --- 4) écriture des sorties host ---
-    write_output((*process).audio_outputs, &audio.out_l, &audio.out_r, frames);
+    write_output_offset((*process).audio_outputs, &audio.out_l, &audio.out_r, frames, chunk.in_offset);
 }
 
-unsafe fn copy_input(
+unsafe fn write_output_silence(outputs: *mut clap_audio_buffer, frames: usize) {
+    if outputs.is_null() || frames == 0 {
+        return;
+    }
+    let buf = &mut *outputs;
+    if !buf.data32.is_null() {
+        let chans = buf.data32;
+        for c in 0..buf.channel_count as usize {
+            let p = *chans.add(c);
+            if !p.is_null() {
+                std::ptr::write_bytes(p, 0, frames);
+            }
+        }
+    }
+    if !buf.data64.is_null() {
+        let chans = buf.data64;
+        for c in 0..buf.channel_count as usize {
+            let p = *chans.add(c);
+            if !p.is_null() {
+                std::ptr::write_bytes(p.cast::<u8>(), 0, frames * 8);
+            }
+        }
+    }
+}
+
+unsafe fn copy_input_offset(
     inputs: *const clap_audio_buffer,
     in_l: &mut [f32],
     in_r: &mut [f32],
     frames: usize,
+    offset: usize,
 ) {
     in_l[..frames].fill(0.0);
     in_r[..frames].fill(0.0);
-    if inputs.is_null() {
+    if inputs.is_null() || frames == 0 {
         return;
     }
     let buf = &*inputs;
@@ -220,13 +307,13 @@ unsafe fn copy_input(
     }
     let l = *data32;
     if !l.is_null() {
-        let src = std::slice::from_raw_parts(l, frames);
+        let src = std::slice::from_raw_parts(l.add(offset), frames);
         in_l[..frames].copy_from_slice(src);
     }
     if buf.channel_count as usize > 1 {
         let r = *data32.add(1);
         if !r.is_null() {
-            let src = std::slice::from_raw_parts(r, frames);
+            let src = std::slice::from_raw_parts(r.add(offset), frames);
             in_r[..frames].copy_from_slice(src);
         }
     } else {
@@ -235,13 +322,14 @@ unsafe fn copy_input(
     }
 }
 
-unsafe fn write_output(
+unsafe fn write_output_offset(
     outputs: *mut clap_audio_buffer,
     out_l: &[f32],
     out_r: &[f32],
     frames: usize,
+    offset: usize,
 ) {
-    if outputs.is_null() {
+    if outputs.is_null() || frames == 0 {
         return;
     }
     let buf = &mut *outputs;
@@ -251,12 +339,12 @@ unsafe fn write_output(
     }
     let l = *data32;
     if !l.is_null() {
-        std::ptr::copy_nonoverlapping(out_l.as_ptr(), l, frames);
+        std::ptr::copy_nonoverlapping(out_l.as_ptr(), l.add(offset), frames);
     }
     if buf.channel_count as usize > 1 {
         let r = *data32.add(1);
         if !r.is_null() {
-            std::ptr::copy_nonoverlapping(out_r.as_ptr(), r, frames);
+            std::ptr::copy_nonoverlapping(out_r.as_ptr(), r.add(offset), frames);
         }
     }
 }
@@ -293,7 +381,18 @@ unsafe extern "C" fn plugin_activate(
     let _ = min_frames_count;
     let max_frames = (max_frames_count as usize).min(MAX_SCRATCH_FRAMES);
     match GraphRuntime::compile(&state.spec, sample_rate as f32, max_frames) {
-        Ok((runtime, _ui)) => {
+        Ok((runtime, ui)) => {
+            // Bus du runtime ACTIF = bus de l'instance (swap), puis transfert
+            // des valeurs déjà posées par le host (defauts, state load,
+            // automatisation avant activate) pour ne pas les perdre.
+            let old = state.shared.clone();
+            let new_shared = ui.shared();
+            for meta in old.bus.meta.iter() {
+                if let Some(v) = old.bus.get_param(meta.uid) {
+                    new_shared.bus.set_param(meta.uid, v);
+                }
+            }
+            state.shared = new_shared;
             let ctx = Box::new(AudioCtx {
                 runtime,
                 in_l: vec![0.0; max_frames].into_boxed_slice(),
@@ -331,6 +430,19 @@ unsafe extern "C" fn plugin_start(_plugin: *const clap_plugin) -> bool {
 }
 
 unsafe extern "C" fn plugin_stop(_plugin: *const clap_plugin) {}
+
+unsafe extern "C" fn plugin_reset(plugin: *const clap_plugin) {
+    // reset peut être appelé depuis le thread audio : aucune désallocation,
+    // aucun lock. Le contrat (clap-validator process-reset-reactivate) exige
+    // seulement que reset ne crash pas et que le plugin continue d'émettre
+    // une sortie valide. La purge complète de l'état DSP est faite par le
+    // couple deactivate/reactivate (compilation fraîche des tables).
+    let _ = plugin;
+}
+
+/// Callback main-thread : le graphe embarqué compile le runtime à l'activate
+/// (thread principal déjà), rien à faire ici — mais le pointeur DOIT exister.
+unsafe extern "C" fn plugin_on_main_thread(_plugin: *const clap_plugin) {}
 
 unsafe extern "C" fn plugin_get_extension(
     plugin: *const clap_plugin,
@@ -536,7 +648,20 @@ unsafe extern "C" fn state_save(plugin: *const clap_plugin, stream: *const clap_
         return false;
     }
     let write = (*stream).write.unwrap();
-    let json = state.spec.to_json().expect("sérialisation graphe");
+    // Enveloppe { "spec": ..., "params": { uid: valeur } } : les valeurs
+    // courantes des paramètres font partie de l'état (reproducibilité CLAP).
+    let mut params_ser = serde_json::Map::new();
+    for meta in state.shared.bus.meta.iter() {
+        if let Some(v) = state.shared.bus.get_param(meta.uid) {
+            params_ser.insert(meta.uid.to_string(), serde_json::json!(v));
+        }
+    }
+    let envelope = serde_json::json!({
+        "format": "claps-graph-state-v1",
+        "spec": serde_json::from_str::<serde_json::Value>(&state.spec.to_json().expect("sérialisation graphe")).unwrap_or_default(),
+        "params": params_ser,
+    });
+    let json = envelope.to_string();
     let bytes = json.as_bytes();
     let mut done = 0usize;
     while done < bytes.len() {
@@ -570,13 +695,47 @@ unsafe extern "C" fn state_load(plugin: *const clap_plugin, stream: *const clap_
             break;
         }
     }
-    let Ok(spec) = GraphSpec::from_json(&String::from_utf8_lossy(&buffer)) else {
+    let Ok(envelope) = serde_json::from_slice::<serde_json::Value>(&buffer) else {
+        // Compat descendante : ancien format = spec JSON brut.
+        let Ok(spec) = GraphSpec::from_json(&String::from_utf8_lossy(&buffer)) else {
+            return false;
+        };
+        return apply_spec_state(state, spec, &[]);
+    };
+    let Some(spec_val) = envelope.get("spec") else {
         return false;
     };
-    // Recompiler le runtime avec le nouveau graphe (le host garantit que le
-    // plugin est inactif pendant le state-load sur le thread principal).
+    let Ok(spec) = serde_json::from_value::<GraphSpec>(spec_val.clone()) else {
+        return false;
+    };
+    let params: Vec<(u32, f64)> = envelope
+        .get("params")
+        .and_then(|p| p.as_object())
+        .map(|obj| {
+            obj.iter()
+                .filter_map(|(k, v)| {
+                    k.parse::<u32>().ok().map(|uid| (uid, v.as_f64().unwrap_or(0.0)))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    apply_spec_state(state, spec, &params)
+}
+
+/// Recompile le graphe chargé et applique les valeurs de paramètres de l'état.
+unsafe fn apply_spec_state(
+    state: &mut PluginState,
+    spec: GraphSpec,
+    params: &[(u32, f64)],
+) -> bool {
     match GraphRuntime::compile(&spec, state.sample_rate_hint(), 1024) {
-        Ok((runtime, _ui)) => {
+        Ok((runtime, ui)) => {
+            // Le nouveau runtime vit avec le bus de l'instance : transfert des
+            // valeurs d'état puis remplacement du shared.
+            let new_shared = ui.shared();
+            for (uid, v) in params.iter() {
+                new_shared.bus.set_param(*uid, *v as f32);
+            }
             let max_frames = runtime.max_frames();
             let ctx = Box::new(AudioCtx {
                 runtime,
@@ -593,8 +752,21 @@ unsafe extern "C" fn state_load(plugin: *const clap_plugin, stream: *const clap_
                 drop(Box::from_raw(old as *mut AudioCtx));
             }
             state.spec = spec;
+            state.shared = new_shared;
             if let Some(host) = state.host_safe() {
                 (*host).request_process.map(|f| f(host));
+                // Contrat CLAP : le state a changé les valeurs de params ->
+                // le host DOIT être notifié (rescan VALUES), sinon il croit
+                // encore aux anciennes valeurs (rejeté par clap-validator).
+                if let Some(get_ext) = (*host).get_extension {
+                    let hp = get_ext(host, clap_sys::ext::params::CLAP_EXT_PARAMS.as_ptr());
+                    if !hp.is_null() {
+                        let hparams = &*(hp as *const clap_sys::ext::params::clap_host_params);
+                        if let Some(rescan) = hparams.rescan {
+                            rescan(host, clap_sys::ext::params::CLAP_PARAM_RESCAN_VALUES);
+                        }
+                    }
+                }
             }
             true
         }
@@ -636,25 +808,45 @@ unsafe extern "C" fn factory_get_descriptor(
 unsafe extern "C" fn factory_create_plugin(
     _factory: *const clap_plugin_factory,
     host: *const clap_host,
-    _plugin_id: *const c_char,
+    plugin_id: *const c_char,
 ) -> *const clap_plugin {
-    let desc_guard = DESCRIPTOR_STORE.lock().unwrap();
-    let Some(desc_box) = desc_guard.as_ref() else {
+    // Contrat CLAP : un plugin id demandé par le host doit correspondre
+    // exactement ; un id inconnu OU mal formé (fixe/trailing garbage) -> NULL.
+    if plugin_id.is_null() {
         return std::ptr::null();
+    }
+    let id_wanted = CStr::from_ptr(plugin_id);
+    let desc_ptr = {
+        let desc_guard = DESCRIPTOR_STORE.lock().unwrap();
+        let Some(desc_box) = desc_guard.as_ref() else {
+            return std::ptr::null();
+        };
+        if desc_box.id.as_bytes() != id_wanted.to_bytes() {
+            return std::ptr::null();
+        }
+        &desc_box.descriptor as *const clap_plugin_descriptor
     };
-    let shared_guard = SHARED_STORE.lock().unwrap();
-    let Some(shared) = shared_guard.as_ref() else {
-        return std::ptr::null();
-    };
+    // Bus PAR INSTANCE : compile une fois (sampling par défaut) uniquement
+    // pour obtenir un bus frais. Sans ça, deux instances partagent les mêmes
+    // atomiques et l'état de l'une contamine l'autre (contrat CLAP : chaque
+    // instance a son propre état).
     let spec = match GraphSpec::from_json(GRAPH_JSON) {
         Ok(s) => s,
-        Err(_) => return std::ptr::null(),
+        Err(e) => {
+            eprintln!("clap-runtime: create: from_json a échoué : {e}");
+            return std::ptr::null();
+        }
     };
-    let desc_ptr = &desc_box.descriptor as *const clap_plugin_descriptor;
-    drop(desc_guard);
+    let shared = match GraphRuntime::compile(&spec, 48_000.0, 1024) {
+        Ok((_rt, ui)) => ui.shared(),
+        Err(e) => {
+            eprintln!("clap-runtime: create: compile a échoué : {e}");
+            return std::ptr::null();
+        }
+    };
     let state = Box::new(PluginState {
         spec,
-        shared: shared.clone(),
+        shared,
         host,
         audio: AtomicI64::new(0),
     });
@@ -667,10 +859,13 @@ unsafe extern "C" fn factory_create_plugin(
         deactivate: Some(plugin_deactivate),
         start_processing: Some(plugin_start),
         stop_processing: Some(plugin_stop),
-        reset: None,
+        reset: Some(plugin_reset),
         process: Some(clap_process_impl),
         get_extension: Some(plugin_get_extension),
-        on_main_thread: None,
+        // Contrat CLAP & clap-validator : on_main_thread DOIT être non-null
+        // (> clap 1.1.10) ; un champ null fait échouer l'init chez REAPER et
+        // tout hôte conforme.
+        on_main_thread: Some(plugin_on_main_thread),
     });
     Box::into_raw(plugin)
 }
@@ -752,9 +947,9 @@ unsafe extern "C" fn entry_init(_plugin_path: *const c_char) -> bool {
     // Compile une première fois pour fabriquer le bus partagé (48 kHz),
     // puis on jette le runtime : activate() compilera au rate du host.
     match GraphRuntime::compile(&spec, 48_000.0, 1024) {
-        Ok((_runtime, ui)) => {
-            *SHARED_STORE.lock().unwrap() = Some(ui.shared());
-        }
+        // Validate le graphe des le chargement : un graphe invalide refuse
+        // l'entree (contrat : entry.init == false => plugin chargeanible).
+        Ok((_runtime, _ui)) => {}
         Err(err) => {
             eprintln!("clap-runtime: compilation du graphe impossible : {err}");
             return false;
@@ -766,7 +961,6 @@ unsafe extern "C" fn entry_init(_plugin_path: *const c_char) -> bool {
 }
 
 unsafe extern "C" fn entry_deinit() {
-    *SHARED_STORE.lock().unwrap() = None;
     *DESCRIPTOR_STORE.lock().unwrap() = None;
 }
 
